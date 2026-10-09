@@ -135,6 +135,23 @@ public struct PathGuard: Sendable {
         let resolved = PathGuard.resolve(standardized)
         let isSymlink = resolved.path != standardized.path
 
+        // Ordem das recusas: da mais específica para a mais genérica. Todas
+        // são recusas — a ordem só decide QUAL motivo o usuário vê. Antes, o
+        // próprio bundle e `/Applications` caíam nas regras genéricas
+        // (primeiro nível / caminho protegido) e os motivos específicos
+        // `.ownApplicationBundle` e `.applicationRootDirectory` nunca apareciam.
+
+        if let ownBundle, isSameOrDescendant(resolved, of: ownBundle, caseInsensitive: caseInsensitive) {
+            return .denied(.ownApplicationBundle)
+        }
+
+        // `/Applications` e `~/Applications` como um todo nunca são removíveis.
+        for root in PathGuard.applicationRoots {
+            if PathGuard.isEqual(resolved, root, caseInsensitive: caseInsensitive) {
+                return .denied(.applicationRootDirectory)
+            }
+        }
+
         // Raízes de volume e diretórios de primeiro nível (/, /tmp, /Users).
         // `pathComponents` de "/" é ["/"] e de "/tmp" é ["/", "tmp"].
         guard resolved.pathComponents.count > 2 else { return .denied(.volumeOrTopLevelDirectory) }
@@ -146,17 +163,6 @@ public struct PathGuard: Sendable {
         for protected in protectedPaths
         where isSameOrDescendant(resolved, of: protected, caseInsensitive: caseInsensitive) {
             return .denied(.protectedSystemPath)
-        }
-
-        if let ownBundle, isSameOrDescendant(resolved, of: ownBundle, caseInsensitive: caseInsensitive) {
-            return .denied(.ownApplicationBundle)
-        }
-
-        // `/Applications` e `~/Applications` como um todo nunca são removíveis.
-        for root in PathGuard.applicationRoots {
-            if PathGuard.isEqual(resolved, root, caseInsensitive: caseInsensitive) {
-                return .denied(.applicationRootDirectory)
-            }
         }
 
         guard !allowedRoots.isEmpty else { return .denied(.outsideAllowedScope) }
