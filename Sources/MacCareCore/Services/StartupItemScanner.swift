@@ -21,7 +21,7 @@ public struct StartupItemScanner: Sendable {
 
     private let fs: FileSystem
 
-    public init(fs: FileSystem = .live) {
+    public init(fs: FileSystem = LiveFileSystem()) {
         self.fs = fs
     }
 
@@ -31,10 +31,9 @@ public struct StartupItemScanner: Sendable {
             (URL(fileURLWithPath: "/Library/LaunchDaemons", isDirectory: true), .launchDaemon, .systemLibrary),
             (URL(fileURLWithPath: "/Library/LaunchAgents", isDirectory: true), .launchAgent, .systemLibrary)
         ]
-        if let home = FileManager.default.homeDirectoryForCurrentUser {
-            directories.append((home.appendingPathComponent("Library/LaunchAgents", isDirectory: true), .launchAgent, .userLibrary))
-            directories.append((home.appendingPathComponent("Library/LaunchDaemons", isDirectory: true), .launchDaemon, .userLibrary))
-        }
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        directories.append((home.appendingPathComponent("Library/LaunchAgents", isDirectory: true), .launchAgent, .userLibrary))
+        directories.append((home.appendingPathComponent("Library/LaunchDaemons", isDirectory: true), .launchDaemon, .userLibrary))
         return directories.map { (url: $0.0, kind: $0.1, source: $0.2) }
     }
 

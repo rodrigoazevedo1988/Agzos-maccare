@@ -24,7 +24,7 @@ public struct DuplicateFinder: Sendable {
     private let minimumSize: Int64
     private let chunkSize: Int
 
-    public init(fs: FileSystem = .live, minimumSize: Int64 = 4_096, chunkSize: Int = 1 << 20) {
+    public init(fs: FileSystem = LiveFileSystem(), minimumSize: Int64 = 4_096, chunkSize: Int = 1 << 20) {
         self.fs = fs
         self.minimumSize = minimumSize
         self.chunkSize = chunkSize
@@ -46,7 +46,12 @@ public struct DuplicateFinder: Sendable {
         var visited = 0
 
         for root in roots {
-            for url in fs.descendents(of: root, skipDirectories: true, maxResults: 500_000) {
+            for await url in fs.descendents(
+                of: root,
+                skipDirectories: true,
+                maxResults: 500_000,
+                errorHandler: { _, _ in }
+            ) {
                 try Task.checkCancellation()
                 visited += 1
 

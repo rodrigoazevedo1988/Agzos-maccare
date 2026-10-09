@@ -115,7 +115,7 @@ public actor DirectoryScanner {
     private let fs: FileSystem
     private let limits: ScanLimits
 
-    public init(fs: FileSystem = .live, limits: ScanLimits = .thorough) {
+    public init(fs: FileSystem = LiveFileSystem(), limits: ScanLimits = .thorough) {
         self.fs = fs
         self.limits = limits
     }
@@ -140,7 +140,7 @@ public actor DirectoryScanner {
         var state = ScanProgress()
 
         outer: for root in roots {
-            for fileURL in fs.descendents(
+            for await fileURL in fs.descendents(
                 of: root,
                 skipDirectories: true,
                 maxResults: effectiveLimits.maxFileCount,
@@ -308,7 +308,7 @@ public actor DirectoryScanner {
 public enum SyncedFolderDetector {
 
     public static func detect(fileManager: FileManager = .default) -> [String] {
-        guard let home = fileManager.homeDirectoryForCurrentUser else { return [] }
+        let home = fileManager.homeDirectoryForCurrentUser
         return [
             home.appendingPathComponent("Library/Mobile Documents").path,
             home.appendingPathComponent("Dropbox").path,

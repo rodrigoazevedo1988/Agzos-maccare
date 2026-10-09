@@ -64,11 +64,6 @@ public protocol FileSystem: Sendable {
     ) -> AsyncStream<URL>
 }
 
-public extension FileSystem {
-
-    var live: FileSystem { LiveFileSystem() }
-}
-
 /// Implementação sobre `FileManager`.
 public struct LiveFileSystem: FileSystem {
 
@@ -144,7 +139,7 @@ public struct LiveFileSystem: FileSystem {
     }
 
     public func moveToTrash(_ url: URL) throws {
-        var resulting: URL?
+        var resulting: NSURL?
         try manager.trashItem(at: url, resultingItemURL: &resulting)
     }
 
@@ -174,7 +169,11 @@ public struct LiveFileSystem: FileSystem {
                     at: root,
                     includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
                     options: [],
-                    errorHandler: { url, error in errorHandler(url, error) }
+                    errorHandler: { url, error in
+                        errorHandler(url, error)
+                        // Item ilegível não interrompe a varredura do resto.
+                        return true
+                    }
                 ) else {
                     continuation.finish()
                     return

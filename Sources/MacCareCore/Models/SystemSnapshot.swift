@@ -139,6 +139,9 @@ public struct VolumeUsage: Hashable, Codable, Sendable {
 
     public var used: Int64 { max(0, totalCapacity - availableCapacity) }
     public var usedFraction: Double { totalCapacity > 0 ? Double(used) / Double(totalCapacity) : 0 }
+    public var availableFraction: Double {
+        totalCapacity > 0 ? Double(min(max(availableCapacity, 0), totalCapacity)) / Double(totalCapacity) : 0
+    }
 }
 
 /// Uma execução do sistema observada pelo monitor.

@@ -28,7 +28,7 @@ public struct AnalysisScope: Sendable {
     /// conter documentos do usuário, e varredura massiva ali seria o oposto
     /// de transparência.
     public static func standard(includeDownloads: Bool = false) -> AnalysisScope? {
-        guard let home = FileManager.default.homeDirectoryForCurrentUser else { return nil }
+        let home = FileManager.default.homeDirectoryForCurrentUser
 
         var roots = [
             home.appendingPathComponent("Library/Caches", isDirectory: true),
@@ -101,7 +101,7 @@ public struct SmartScanCoordinator: Sendable {
     private let fs: FileSystem
     private let scanner: DirectoryScanner
 
-    public init(fs: FileSystem = .live) {
+    public init(fs: FileSystem = LiveFileSystem()) {
         self.fs = fs
         self.scanner = DirectoryScanner(fs: fs)
     }
@@ -275,7 +275,7 @@ public struct SmartScanCoordinator: Sendable {
     /// `DerivedData` ou cache de gerenciador de pacotes leva a recompilações
     /// demoradas, e o usuário precisa saber disso antes de aceitar.
     private func analyzeDeveloperData(scope: AnalysisScope) async -> [CleanupCandidate] {
-        guard let home = FileManager.default.homeDirectoryForCurrentUser else { return [] }
+        let home = FileManager.default.homeDirectoryForCurrentUser
 
         let known: [(URL, String, String)] = [
             (home.appendingPathComponent("Library/Developer/Xcode/DerivedData"),

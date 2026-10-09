@@ -76,3 +76,11 @@ public enum Measurement<Value: Sendable>: Sendable {
         }
     }
 }
+
+// Conformidades condicionais: `SystemSnapshot` e os modelos que embrulham
+// medições precisam ser `Hashable` e `Codable`, o que só é possível quando o
+// valor medido também é.
+extension Measurement: Equatable where Value: Equatable {}
+extension Measurement: Hashable where Value: Hashable {}
+extension Measurement: Encodable where Value: Encodable {}
+extension Measurement: Decodable where Value: Decodable {}

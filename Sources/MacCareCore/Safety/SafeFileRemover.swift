@@ -225,7 +225,7 @@ public actor SafeFileRemover {
     public init(
         guardrail: PathGuard,
         maxConcurrentOperations: Int = 4,
-        fs: FileSystem = .live
+        fs: FileSystem = LiveFileSystem()
     ) {
         self.guardrail = guardrail
         self.maxConcurrentOperations = max(1, maxConcurrentOperations)
@@ -260,7 +260,7 @@ public actor SafeFileRemover {
 
             let batchOutcomes = await withTaskGroup(of: RemovalOutcome.self) { group in
                 for candidate in batch {
-                    group.addTask { self.process(candidate, strategy: plan.strategy) }
+                    group.addTask { await self.process(candidate, strategy: plan.strategy) }
                 }
                 var collected: [RemovalOutcome] = []
                 for await outcome in group { collected.append(outcome) }
@@ -378,11 +378,11 @@ public actor SafeFileRemover {
     /// "-2 GB liberados".
     private nonisolated func confirmedRelease(
         strategy: RemovalStrategy,
-        before: Int64,
+        before: Int64?,
         after: Int64?,
         outcomes: [RemovalOutcome]
     ) -> Int64 {
-        guard strategy == .permanentlyDelete, let after else { return 0 }
+        guard strategy == .permanentlyDelete, let before, let after else { return 0 }
         let delta = after - before
         guard delta > 0 else { return 0 }
         return min(delta, outcomes.compactMap(\.measuredSize).reduce(0, +))

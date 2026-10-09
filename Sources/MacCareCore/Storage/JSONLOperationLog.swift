@@ -2,11 +2,11 @@ import Foundation
 
 /// Persistência do histórico de operações.
 public protocol OperationLogStoring: Sendable {
-    func append(_ record: OperationRecord) throws
-    func all() throws -> [OperationRecord]
-    func clear() throws
+    func append(_ record: OperationRecord) async throws
+    func all() async throws -> [OperationRecord]
+    func clear() async throws
     /// Exporta o histórico como JSONL já redigido.
-    func exportRedacted() throws -> Data
+    func exportRedacted() async throws -> Data
 }
 
 /// ## Por que JSONL em vez de SwiftData
@@ -49,7 +49,7 @@ public actor JSONLOperationLog: OperationLogStoring {
     }
 
     /// Local padrão do log, dentro do container do aplicativo.
-    public static func defaultLocation(container: URL = .applicationSupportDirectory) -> URL {
+    public static func defaultLocation(container: URL = URL.applicationSupportDirectory) -> URL {
         container.appendingPathComponent("MacCare/operation-log.jsonl")
     }
 
@@ -95,7 +95,7 @@ public actor JSONLOperationLog: OperationLogStoring {
     public func exportRedacted() throws -> Data {
         let home = fileManager.homeDirectoryForCurrentUser.path
         let records = try all().map { $0.redacted(homePath: home) }
-        let payload = records.map { try encoder.encode($0) }
+        let payload = try records.map { try encoder.encode($0) }
         let joined = payload.compactMap { String(data: $0, encoding: .utf8) }.joined(separator: "\n")
         return Data(joined.utf8)
     }
@@ -106,19 +106,5 @@ public actor JSONLOperationLog: OperationLogStoring {
         public var errorDescription: String? {
             "Não foi possível codificar o registro de operação."
         }
-    }
-}
-
-extension URL {
-    /// Diretório de suporte do aplicativo, criado sob demanda.
-    ///
-    /// Usa `FileManager.url(for:in:appropriateFor:create:)` em vez de
-    /// `~Library/Application Support`: em sandbox, o caminho real é reescrito
-    /// para o container, e hardcodar a pasta erraria o alvo.
-    var applicationSupportDirectory: URL {
-        let fm = FileManager.default
-        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
-        return base.appendingPathComponent("MacCare", isDirectory: true)
     }
 }

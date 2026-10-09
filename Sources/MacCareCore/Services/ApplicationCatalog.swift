@@ -14,7 +14,7 @@ public struct ApplicationCatalog: Sendable {
     private let fs: FileSystem
     private let additionalRoots: [URL]
 
-    public init(fs: FileSystem = .live, additionalRoots: [URL] = []) {
+    public init(fs: FileSystem = LiveFileSystem(), additionalRoots: [URL] = []) {
         self.fs = fs
         self.additionalRoots = additionalRoots
     }
@@ -24,9 +24,8 @@ public struct ApplicationCatalog: Sendable {
         var roots: [(URL, ApplicationLocation)] = [
             (URL(fileURLWithPath: "/Applications", isDirectory: true), .systemApplications)
         ]
-        if let home = FileManager.default.homeDirectoryForCurrentUser {
-            roots.append((home.appendingPathComponent("Applications", isDirectory: true), .userApplications))
-        }
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        roots.append((home.appendingPathComponent("Applications", isDirectory: true), .userApplications))
         return roots.map { (url: $0.0, location: $0.1) }
     }
 
@@ -153,7 +152,7 @@ public struct Uninstaller: Sendable {
 
     private let fs: FileSystem
 
-    public init(fs: FileSystem = .live) {
+    public init(fs: FileSystem = LiveFileSystem()) {
         self.fs = fs
     }
 
@@ -162,7 +161,7 @@ public struct Uninstaller: Sendable {
     /// A ordem reflete a confiança: as primeiras são fortemente associadas ao
     /// bundle, as últimas são apenas "sempre que o app passou por aqui".
     private static func residualLocations(bundleID: String, appName: String) -> [(URL, LeftoverArtifact.Association)] {
-        guard let home = FileManager.default.homeDirectoryForCurrentUser else { return [] }
+        let home = FileManager.default.homeDirectoryForCurrentUser
 
         let support = home.appendingPathComponent("Library/Application Support", isDirectory: true)
             .appendingPathComponent(bundleID, isDirectory: true)

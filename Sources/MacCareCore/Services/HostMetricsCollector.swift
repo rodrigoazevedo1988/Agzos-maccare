@@ -43,7 +43,7 @@ public struct HostMetricsCollector: Sendable {
             // existe para evitar.
             marketingName: nil,
             chipName: sysctlString("machdep.cpu.brand_string"),
-            physicalMemory: ProcessInfo.processInfo.physicalMemory,
+            physicalMemory: Int64(ProcessInfo.processInfo.physicalMemory),
             osVersion: "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)",
             osBuild: sysctlString("kern.osversion") ?? "—",
             isAppleSilicon: isAppleSilicon
@@ -76,7 +76,7 @@ public struct HostMetricsCollector: Sendable {
             host_statistics(
                 mach_host_self(),
                 HOST_CPU_LOAD_INFO,
-                UnsafeMutableRawPointer(pointer).assumingMemoryBound(to: host_info_t.self),
+                UnsafeMutableRawPointer(pointer).assumingMemoryBound(to: integer_t.self),
                 &count
             )
         }
@@ -114,7 +114,7 @@ public struct HostMetricsCollector: Sendable {
             host_statistics64(
                 mach_host_self(),
                 HOST_VM_INFO64,
-                UnsafeMutableRawPointer(pointer).assumingMemoryBound(to: host_info_t.self),
+                UnsafeMutableRawPointer(pointer).assumingMemoryBound(to: integer_t.self),
                 &count
             )
         }
@@ -122,17 +122,28 @@ public struct HostMetricsCollector: Sendable {
         guard result == KERN_SUCCESS else { return .unavailable(.ioFailure) }
 
         let pageSize = Int64(currentPageSize())
+        let physical = Int64(ProcessInfo.processInfo.physicalMemory)
+
+        // "Memória usada" no mesmo critério do Monitor de Atividade:
+        // memória de apps (páginas internas menos as purgáveis) + wired +
+        // comprimida. Cache de arquivos e páginas purgáveis contam como
+        // disponíveis, porque o sistema as devolve sob demanda.
+        let appMemory = (Int64(stats.internal_page_count) - Int64(stats.purgeable_count)) * pageSize
+        let usedLikeActivityMonitor = max(0, appMemory)
+            + Int64(stats.wire_count) * pageSize
+            + Int64(stats.compressor_page_count) * pageSize
+        let available = min(physical, max(0, physical - usedLikeActivityMonitor))
 
         return .available(
             MemoryUsage(
-                physical: ProcessInfo.processInfo.physicalMemory,
+                physical: physical,
                 wired: Int64(stats.wire_count) * pageSize,
                 active: Int64(stats.active_count) * pageSize,
                 compressed: Int64(stats.compressor_page_count) * pageSize,
                 free: Int64(stats.free_count) * pageSize,
-                // `os_proc_available_memory` (macOS 13+) considera memória
-                // comprimida e inativa de forma mais fiel do que `free_count`.
-                available: Int64(os_proc_available_memory()),
+                // `os_proc_available_memory` não existe no macOS (só iOS);
+                // o valor vem do cálculo acima, a partir de `vm_statistics64`.
+                available: available,
                 swapUsed: swapUsage()?.used
             )
         )
@@ -142,7 +153,7 @@ public struct HostMetricsCollector: Sendable {
         var usage = xsw_usage()
         var length = MemoryLayout<xsw_usage>.size
         guard sysctlbyname("vm.swapusage", &usage, &length, nil, 0) == 0 else { return nil }
-        return (Int64(usage.used), Int64(usage.total))
+        return (Int64(usage.xsu_used), Int64(usage.xsu_total))
     }
 
     private func currentPageSize() -> Int {
