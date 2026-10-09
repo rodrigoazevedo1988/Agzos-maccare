@@ -172,7 +172,7 @@ struct PerformanceView: View {
                     symbol: "clock.arrow.circlepath",
                     tint: Theme.Palette.secondaryText,
                     value: snapshot.cpu.map { ByteSizeFormatter.percent($0.busy) },
-                    caption: snapshot.cpu.map {
+                    caption: snapshot.cpu.value.map {
                         "Usuário \(ByteSizeFormatter.percent($0.user)) · Sistema \(ByteSizeFormatter.percent($0.system)) · Ocioso \(ByteSizeFormatter.percent($0.idle))"
                     }
                 )

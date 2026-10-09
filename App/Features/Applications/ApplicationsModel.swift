@@ -240,7 +240,7 @@ final class ApplicationsModel {
             Task { @MainActor in
                 guard let self else { return }
                 self.errorMessage = error.map {
-                    "Não foi possível abrir \(entry.name). \(error.localizedDescription)"
+                    "Não foi possível abrir \(entry.name). \($0.localizedDescription)"
                 }
             }
         }
@@ -249,11 +249,14 @@ final class ApplicationsModel {
     /// Seleciona o aplicativo no Finder.
     @discardableResult
     func revealInFinder(_ entry: ApplicationEntry) -> Bool {
-        let selected = NSWorkspace.shared.activateFileViewerSelecting([entry.url])
-        if !selected {
+        // `activateFileViewerSelecting` não devolve resultado; a única falha
+        // verificável antes da chamada é o item não existir mais.
+        guard FileManager.default.fileExists(atPath: entry.url.path) else {
             errorMessage = "Não foi possível selecionar \(entry.name) no Finder."
+            return false
         }
-        return selected
+        NSWorkspace.shared.activateFileViewerSelecting([entry.url])
+        return true
     }
 
     func clearError() {

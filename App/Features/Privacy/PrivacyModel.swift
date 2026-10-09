@@ -301,7 +301,7 @@ final class PrivacyModel {
             if Task.isCancelled { break }
 
             let size = await Task.detached(priority: .utility) {
-                FileSizeMeasurer.directorySize(of: target.url, fs: FileSystem.live)
+                FileSizeMeasurer.directorySize(of: target.url, fs: LiveFileSystem())
             }.value
 
             var updated = target
@@ -384,7 +384,7 @@ final class PrivacyModel {
 extension PrivacyModel.ReviewTopic {
 
     static let all: [PrivacyModel.ReviewTopic] = [
-        ReviewTopic(
+        PrivacyModel.ReviewTopic(
             id: "camera-microphone",
             title: "Câmera e microfone",
             symbolName: "video",
@@ -410,7 +410,7 @@ extension PrivacyModel.ReviewTopic {
                 )
             ]
         ),
-        ReviewTopic(
+        PrivacyModel.ReviewTopic(
             id: "files-and-folders",
             title: "Arquivos e pastas",
             symbolName: "folder",
@@ -430,7 +430,7 @@ extension PrivacyModel.ReviewTopic {
                 )
             ]
         ),
-        ReviewTopic(
+        PrivacyModel.ReviewTopic(
             id: "accessibility-automation",
             title: "Acessibilidade e automação",
             symbolName: "accessibility",
@@ -455,7 +455,7 @@ extension PrivacyModel.ReviewTopic {
                 )
             ]
         ),
-        ReviewTopic(
+        PrivacyModel.ReviewTopic(
             id: "full-disk-access",
             title: "Acesso Completo ao Disco",
             symbolName: "lock.shield",
@@ -476,7 +476,7 @@ extension PrivacyModel.ReviewTopic {
                 )
             ]
         ),
-        ReviewTopic(
+        PrivacyModel.ReviewTopic(
             id: "lock-screen",
             title: "Tela de bloqueio",
             symbolName: "lock",
@@ -497,7 +497,7 @@ extension PrivacyModel.ReviewTopic {
                 )
             ]
         ),
-        ReviewTopic(
+        PrivacyModel.ReviewTopic(
             id: "siri-dictation",
             title: "Siri e ditado",
             symbolName: "waveform",

@@ -74,7 +74,7 @@ struct DashboardView: View {
                 symbol: "cpu",
                 tint: cpuTint(snapshot.cpu),
                 value: snapshot.cpu.map { ByteSizeFormatter.percent($0.busy) },
-                caption: snapshot.cpu.map { "Usuário \(ByteSizeFormatter.percent($0.user)) · Sistema \(ByteSizeFormatter.percent($0.system))" } ?? nil
+                caption: snapshot.cpu.value.map { "Usuário \(ByteSizeFormatter.percent($0.user)) · Sistema \(ByteSizeFormatter.percent($0.system))" }
             )
 
             StatTile(
@@ -90,7 +90,7 @@ struct DashboardView: View {
                 symbol: "internaldrive",
                 tint: diskTint(snapshot.volume),
                 value: snapshot.volume.map { "\(ByteSizeFormatter.format($0.availableCapacity)) livres" },
-                caption: snapshot.volume.map { ByteSizeFormatter.percent($0.usedFraction) + " em uso" } ?? nil
+                caption: snapshot.volume.value.map { ByteSizeFormatter.percent($0.usedFraction) + " em uso" }
             )
 
             StatTile(
@@ -98,7 +98,7 @@ struct DashboardView: View {
                 symbol: "battery.75",
                 tint: Theme.Palette.success,
                 value: snapshot.battery.map { "\($0.chargePercent)%" },
-                caption: snapshot.battery.map { $0.isCharging ? "Carregando" : ($0.isPluggedIn ? "Ligado à energia" : "Uso de bateria") } ?? nil
+                caption: snapshot.battery.value.map { $0.isCharging ? "Carregando" : ($0.isPluggedIn ? "Ligado à energia" : "Uso de bateria") }
             )
 
             StatTile(
@@ -182,7 +182,7 @@ struct DashboardView: View {
                 ForEach(insights) { insight in
                     InsightCard(insight: insight) {
                         guard let destination = insight.destination else { return }
-                        model.go(to: Feature(destinationFeature(destination)))
+                        model.go(to: destinationFeature(destination))
                     }
                 }
             }
@@ -311,6 +311,13 @@ private struct QuickActionButton: View {
     let action: (Feature) -> Void
 
     @State private var isHovering = false
+
+    init(_ title: String, _ symbol: String, _ destination: Feature, action: @escaping (Feature) -> Void) {
+        self.title = title
+        self.symbol = symbol
+        self.destination = destination
+        self.action = action
+    }
 
     var body: some View {
         Button { action(destination) } label: {

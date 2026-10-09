@@ -154,17 +154,3 @@ public enum Theme {
         public static let tileMinWidth: CGFloat = 180
     }
 }
-
-// MARK: - Conformidade a SwiftUI
-
-extension Theme.Radius {
-    /// Raio como `Shape`, para uso direto em `.clipShape()`.
-    public var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: rawValue, style: .continuous)
-    }
-}
-
-extension Theme.Spacing {
-    public func horizontal(_ value: CGFloat) -> some View { padding(.horizontal, value) }
-    public func vertical(_ value: CGFloat) -> some View { padding(.vertical, value) }
-}

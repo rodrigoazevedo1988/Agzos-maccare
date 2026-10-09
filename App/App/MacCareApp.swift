@@ -9,16 +9,15 @@ struct MacCareApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView(model: model, environment: environment)
+            RootView(model: model)
+                .environment(environment)
                 .frame(
                     minWidth: Theme.Metrics.minWindowWidth,
                     minHeight: Theme.Metrics.minWindowHeight
                 )
-                // O app se comporta como um documento único: abrir dois
-                // $("#MacCare") com históricos diferentes criaria ambiguidade
-                // sobre qual é o estado autoritativo das operações.
-                .defaultSize(width: 1180, height: 760)
         }
+        // `defaultSize` é modificador de `Scene`, não de `View`.
+        .defaultSize(width: 1180, height: 760)
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unifiedCompact)
         .commands {
@@ -55,7 +54,7 @@ struct RootView: View {
         // `@Bindable` e necessario aqui porque a largura da coluna e um
         // `Binding`. As telas abaixo recebem o modelo como valor simples.
         NavigationSplitView(columnVisibility: $model.columnVisibility) {
-            SidebarView(selection: $model.selectedFeature)
+            SidebarView(selection: $model.sidebarSelection)
                 .navigationSplitViewColumnWidth(
                     min: Theme.Metrics.sidebarWidth - 40,
                     ideal: Theme.Metrics.sidebarWidth,
@@ -208,9 +207,7 @@ struct SidebarView: View {
 
     /// Substitui a pasta do usuário por `~` — legível e menos revelador.
     private func abbreviated(_ url: URL) -> String {
-        guard let home = FileManager.default.homeDirectoryForCurrentUser.path else {
-            return url.path
-        }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
         return url.path.replacingOccurrences(of: home, with: "~")
     }
 }

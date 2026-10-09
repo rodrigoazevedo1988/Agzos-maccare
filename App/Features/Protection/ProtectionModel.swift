@@ -254,7 +254,7 @@ final class ProtectionModel {
         switch filter {
         case .all: return reports
         case .suspicious, .unverified, .noIndicators, .confirmed:
-            return reports.filter { $0.verdict == filter }
+            return reports.filter { $0.verdict.rawValue == filter.rawValue }
         }
     }
 
@@ -491,7 +491,7 @@ enum SignatureInspector {
     /// Gatekeeper.
     static func inspect(_ url: URL) -> Facts {
         var staticCode: SecStaticCode?
-        let createStatus = SecStaticCodeCreateWithPath(url as CFURL, nil, &staticCode)
+        let createStatus = SecStaticCodeCreateWithPath(url as CFURL, [], &staticCode)
 
         guard createStatus == errSecSuccess, let code = staticCode else {
             return Facts(
@@ -507,12 +507,12 @@ enum SignatureInspector {
         // `errSecCSUnsigned` é o único código que significa "não há
         // assinatura". Qualquer outro erro significa que existe uma assinatura
         // e ela não foi aceita — distinção que muda o texto exibido.
-        let validityStatus = SecStaticCodeCheckValidity(code, 0, nil)
+        let validityStatus = SecStaticCodeCheckValidity(code, [], nil)
         let isValid = validityStatus == errSecSuccess
         let isSigned = validityStatus != errSecCSUnsigned
 
         var information: CFDictionary?
-        let informationStatus = SecCodeCopySigningInformation(code, kSecCSSigningInformation, &information)
+        let informationStatus = SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &information)
         let details = informationStatus == errSecSuccess ? information as? [String: Any] : nil
         let teamIdentifier = details?[kSecCodeInfoTeamIdentifier as String] as? String
         let certificates = details?[kSecCodeInfoCertificates as String] as? [Any]
@@ -522,15 +522,19 @@ enum SignatureInspector {
         if !isValid {
             notarization = .notApplicable
         } else {
-            // Flag que exige o registro no serviço de notarização da Apple.
-            // A conversão é explícita porque `SecCSFlags` é um `UInt32` e a
-            // forma como as constantes de `SecStaticCode.h` são importadas
-            // variou entre versões do SDK.
-            let requiresNotarization: SecCSFlags = SecCSFlags(SecCSCheckNotarized)
-            let notarizationStatus = SecStaticCodeCheckValidity(code, requiresNotarization, nil)
-            notarization = notarizationStatus == errSecSuccess
-                ? .notarized
-                : .notConfirmed(statusCode: notarizationStatus)
+            // Não existe flag `SecCSFlags` para notarização. A forma pública é
+            // o requisito de assinatura "notarized" — o mesmo usado por
+            // `codesign --verify -R="notarized"`.
+            var requirement: SecRequirement?
+            let requirementStatus = SecRequirementCreateWithString("notarized" as CFString, [], &requirement)
+            if requirementStatus == errSecSuccess, let requirement {
+                let notarizationStatus = SecStaticCodeCheckValidity(code, [], requirement)
+                notarization = notarizationStatus == errSecSuccess
+                    ? .notarized
+                    : .notConfirmed(statusCode: notarizationStatus)
+            } else {
+                notarization = .notConfirmed(statusCode: requirementStatus)
+            }
         }
 
         return Facts(
