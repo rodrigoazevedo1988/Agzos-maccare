@@ -1,0 +1,44 @@
+# Build
+.build/
+DerivedData/
+build/
+*.o
+*.swiftmodule
+*.swiftdoc
+*.dSYM/
+
+# Xcode / IDE
+*.xcodeproj/
+*.xcworkspace/
+!*.xcodeproj/project.pbxproj
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.moved-aside
+DerivedData/
+.swiftpm/
+Package.resolved
+
+# Sistema
+.DS_Store
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# Segredos e credenciais — nunca versionados
+*.p12
+*.cer
+*.mobileprovision
+.env
+.env.*
+secrets/
+*.secret
+.touchid
+id_rsa*
+# helpers temporarios de credencial usados no bootstrap
+.git-askpass*
+
+# Artefatos de distribuicao
+*.dmg
+*.pkg
+exportOptions.plist
