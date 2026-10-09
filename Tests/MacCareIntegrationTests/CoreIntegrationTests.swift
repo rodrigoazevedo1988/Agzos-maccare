@@ -1,5 +1,5 @@
 import Foundation
-import XCTest
+import Testing
 @testable import MacCareCore
 
 /// ## Testes de integração do núcleo
@@ -9,13 +9,13 @@ import XCTest
 /// "nunca executar testes destrutivos em diretórios reais do usuário".
 ///
 /// Cada teste cria sua própria árvore, executa, e apaga tudo no encerramento —
-/// inclusive quando falha, via `addTeardownBlock`.
-final class CoreIntegrationTests: XCTestCase {
+/// inclusive quando falha, via `deinit` da suíte (uma instância por teste).
+@Suite("Integração do núcleo")
+final class CoreIntegrationTests {
 
-    private var sandbox: URL!
+    private let sandbox: URL
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    init() throws {
         // `/tmp`, e não `FileManager.temporaryDirectory`: no macOS o temporário
         // por usuário fica em `/private/var/folders/...`, e `/private/var` é
         // caminho protegido do `PathGuard` — os testes de remoção seriam
@@ -25,9 +25,8 @@ final class CoreIntegrationTests: XCTestCase {
         try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
-        if let sandbox { try? FileManager.default.removeItem(at: sandbox) }
-        try super.tearDownWithError()
+    deinit {
+        try? FileManager.default.removeItem(at: sandbox)
     }
 
     @discardableResult
@@ -43,26 +42,26 @@ final class CoreIntegrationTests: XCTestCase {
 
     // MARK: - Leitura de tamanho
 
-    func testMedeTamanhoDeArquivo() throws {
+    @Test func testMedeTamanhoDeArquivo() throws {
         let file = try makeFile("a.txt", contents: String(repeating: "x", count: 5_000))
         let fs = LiveFileSystem()
 
-        let size = try XCTUnwrap(fs.allocatedSize(of: file))
-        XCTAssertGreaterThanOrEqual(size, 5_000, "o tamanho em disco não pode ser menor que o conteúdo")
+        let size = try #require(fs.allocatedSize(of: file))
+        #expect(size >= 5_000, "o tamanho em disco não pode ser menor que o conteúdo")
     }
 
-    func testMedeTamanhoDeDiretorioRecursivamente() throws {
+    @Test func testMedeTamanhoDeDiretorioRecursivamente() throws {
         try makeFile("pasta/a.bin", contents: String(repeating: "a", count: 10_000))
         try makeFile("pasta/sub/b.bin", contents: String(repeating: "b", count: 20_000))
         let fs = LiveFileSystem()
 
-        let size = try XCTUnwrap(FileSizeMeasurer.directorySize(of: sandbox.appendingPathComponent("pasta"), fs: fs))
-        XCTAssertGreaterThanOrEqual(size, 30_000)
+        let size = try #require(FileSizeMeasurer.directorySize(of: sandbox.appendingPathComponent("pasta"), fs: fs))
+        #expect(size >= 30_000)
     }
 
     // MARK: - Varredura
 
-    func testVarreduraEncontraArquivoAcimaDoLimite() async throws {
+    @Test func testVarreduraEncontraArquivoAcimaDoLimite() async throws {
         try makeFile("grande.bin", contents: String(repeating: "x", count: 40_000))
         try makeFile("pequeno.bin", contents: "x")
 
@@ -72,12 +71,12 @@ final class CoreIntegrationTests: XCTestCase {
             query: FileQuery(minimumSize: 10_000)
         )
 
-        XCTAssertEqual(result.files.count, 1)
-        XCTAssertEqual(result.files.first?.url.lastPathComponent, "grande.bin")
-        XCTAssertTrue(result.progress.isFinished)
+        #expect(result.files.count == 1)
+        #expect(result.files.first?.url.lastPathComponent == "grande.bin")
+        #expect(result.progress.isFinished)
     }
 
-    func testFiltroPorExtensao() async throws {
+    @Test func testFiltroPorExtensao() async throws {
         try makeFile("foto.jpg", contents: String(repeating: "x", count: 5_000))
         try makeFile("codigo.swift", contents: String(repeating: "x", count: 5_000))
 
@@ -87,11 +86,11 @@ final class CoreIntegrationTests: XCTestCase {
             query: FileQuery(minimumSize: 1_000, allowedExtensions: ["jpg"])
         )
 
-        XCTAssertEqual(result.files.count, 1)
-        XCTAssertEqual(result.files.first?.url.pathExtension, "jpg")
+        #expect(result.files.count == 1)
+        #expect(result.files.first?.url.pathExtension == "jpg")
     }
 
-    func testVarreduraRespeitaCancelamento() async throws {
+    @Test func testVarreduraRespeitaCancelamento() async throws {
         for index in 0..<40 {
             try makeFile("arquivo-\(index).bin", contents: String(repeating: "x", count: 2_000))
         }
@@ -113,7 +112,7 @@ final class CoreIntegrationTests: XCTestCase {
 
     // MARK: - Duplicados
 
-    func testDetectaArquivosComConteudoIdentico() async throws {
+    @Test func testDetectaArquivosComConteudoIdentico() async throws {
         let conteudo = String(repeating: "conteudo duplicado ", count: 500)
         try makeFile("original.bin", contents: conteudo)
         try makeFile("copia1.bin", contents: conteudo)
@@ -123,18 +122,18 @@ final class CoreIntegrationTests: XCTestCase {
         let finder = DuplicateFinder(fs: LiveFileSystem(), minimumSize: 100)
         let groups = try await finder.findDuplicates(in: [sandbox])
 
-        XCTAssertEqual(groups.count, 1, "apenas o trio de conteúdo idêntico forma grupo")
-        XCTAssertEqual(groups[0].fileCount, 3)
+        #expect(groups.count == 1, "apenas o trio de conteúdo idêntico forma grupo")
+        #expect(groups[0].fileCount == 3)
 
         // Três cópias: preservar uma deixa duas removíveis.
-        XCTAssertEqual(groups[0].reclaimableSize, groups[0].sizeOnDisk * 2)
+        #expect(groups[0].reclaimableSize == groups[0].sizeOnDisk * 2)
     }
 
     /// Nomes parecidos não são duplicatas.
     ///
     /// Este teste protege a regra do PRD §11 contra uma otimização tentadora:
     /// comparar nome + tamanho em vez de hashear o conteúdo.
-    func testNomesParecidosNaoSaoDuplicatas() async throws {
+    @Test func testNomesParecidosNaoSaoDuplicatas() async throws {
         let base = String(repeating: "z", count: 4_000)
         try makeFile("relatorio-final.bin", contents: base)
         try makeFile("relatorio-final-v2.bin", contents: base + "extra")
@@ -142,34 +141,41 @@ final class CoreIntegrationTests: XCTestCase {
         let finder = DuplicateFinder(fs: LiveFileSystem(), minimumSize: 100)
         let groups = try await finder.findDuplicates(in: [sandbox])
 
-        XCTAssertTrue(groups.isEmpty, "conteúdo diferente não é duplicata, por mais parecidos que os nomes sejam")
+        #expect(groups.isEmpty, "conteúdo diferente não é duplicata, por mais parecidos que os nomes sejam")
     }
 
     /// Hard links são o mesmo arquivo, não cópias.
-    func testHardLinksNaoViramGrupoDeDuplicatas() async throws {
+    @Test func testHardLinksNaoViramGrupoDeDuplicatas() async throws {
         let original = try makeFile("original.bin", contents: String(repeating: "q", count: 4_000))
         let link = sandbox.appendingPathComponent("link.bin")
 
         // Criar hard link exige o mesmo volume; pode falhar em alguns sistemas.
         // `linkItem` lança em vez de devolver Bool.
         let linked = (try? FileManager.default.linkItem(at: original, to: link)) != nil
-        try XCTSkipIf(!linked, "sistema de arquivos não suporta hard link neste ambiente")
+        if !linked {
+            try Test.cancel("sistema de arquivos não suporta hard link neste ambiente")
+        }
 
         let finder = DuplicateFinder(fs: LiveFileSystem(), minimumSize: 100)
         let groups = try await finder.findDuplicates(in: [sandbox])
 
-        XCTAssertTrue(
-            groups.isEmpty,
-            "dois caminhos para o mesmo inode são o mesmo arquivo; removê-los destruiria o conteúdo"
-        )
+        #expect(groups.isEmpty, "dois caminhos para o mesmo inode são o mesmo arquivo; removê-los destruiria o conteúdo")
     }
 
     // MARK: - Lixeira
 
     /// O caminho padrão manda para a Lixeira e é reversível.
-    func testRemocaoUsaLixeiraPorPadrao() async throws {
-        let file = try makeFile("descartavel.bin", contents: String(repeating: "x", count: 1_000))
+    @Test func testRemocaoUsaLixeiraPorPadrao() async throws {
+        // Nome único: o teste move um arquivo de verdade para a Lixeira do
+        // usuário e, no fim, apaga exatamente esse item de lá. Com nome fixo,
+        // uma segunda execução ganharia outro nome na Lixeira e sobraria lixo.
+        let fileName = "descartavel-\(UUID().uuidString).bin"
+        let file = try makeFile(fileName, contents: String(repeating: "x", count: 1_000))
         let fs = LiveFileSystem()
+        let trashedCopy = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".Trash", isDirectory: true)
+            .appendingPathComponent(fileName)
+        defer { try? FileManager.default.removeItem(at: trashedCopy) }
 
         let guardrail = PathGuard(allowedRoots: [sandbox])
         let remover = SafeFileRemover(guardrail: guardrail, fs: fs)
@@ -184,12 +190,16 @@ final class CoreIntegrationTests: XCTestCase {
         let selection = try ConfirmedSelection(items: [candidate], kind: .standard)
         let report = try await remover.execute(try RemovalPlan(selection: selection))
 
-        XCTAssertEqual(report.movedToTrash.count, 1, "a operação padrão deve ser mover para a Lixeira")
-        XCTAssertEqual(report.failed.count, 0)
+        #expect(report.movedToTrash.count == 1, "a operação padrão deve ser mover para a Lixeira")
+        #expect(report.failed.count == 0)
+        #expect(
+            FileManager.default.fileExists(atPath: trashedCopy.path),
+            "o item precisa estar na Lixeira, recuperável — não excluído"
+        )
     }
 
     /// Um caminho fora do escopo é ignorado, mesmo com tudo o mais válido.
-    func testCaminhoForaDoEscopoEIgnoradoNaIntegracao() async throws {
+    @Test func testCaminhoForaDoEscopoEIgnoradoNaIntegracao() async throws {
         let fs = LiveFileSystem()
         // Escopo aponta para o sandbox; o candidato aponta para fora dele.
         let guardrail = PathGuard(allowedRoots: [sandbox])
@@ -205,14 +215,14 @@ final class CoreIntegrationTests: XCTestCase {
         let selection = try ConfirmedSelection(items: [candidate], kind: .standard)
         let report = try await remover.execute(try RemovalPlan(selection: selection))
 
-        XCTAssertEqual(report.skipped.count, 1)
-        XCTAssertEqual(report.movedToTrash.count, 0)
-        XCTAssertEqual(report.deleted.count, 0)
+        #expect(report.skipped.count == 1)
+        #expect(report.movedToTrash.count == 0)
+        #expect(report.deleted.count == 0)
     }
 
     // MARK: - Info.plist
 
-    func testLeInfoPlistDeBundleDeTeste() throws {
+    @Test func testLeInfoPlistDeBundleDeTeste() throws {
         let app = sandbox.appendingPathComponent("MeuApp.app")
         let contents = app.appendingPathComponent("Contents")
         try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
@@ -226,19 +236,16 @@ final class CoreIntegrationTests: XCTestCase {
         let data = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
         try data.write(to: contents.appendingPathComponent("Info.plist"))
 
-        let lido = try XCTUnwrap(ApplicationCatalog.readInfoPlist(at: app))
-        XCTAssertEqual(lido["CFBundleIdentifier"] as? String, "com.exemplo.meuapp")
-        XCTAssertEqual(lido["CFBundleShortVersionString"] as? String, "2.1.0")
+        let lido = try #require(ApplicationCatalog.readInfoPlist(at: app))
+        #expect(lido["CFBundleIdentifier"] as? String == "com.exemplo.meuapp")
+        #expect(lido["CFBundleShortVersionString"] as? String == "2.1.0")
     }
 
     /// Diretório sem `Info.plist` não é um aplicativo.
-    func testPastaSemInfoPlistNaoEReconhecidaComoApp() throws {
+    @Test func testPastaSemInfoPlistNaoEReconhecidaComoApp() throws {
         let pasta = sandbox.appendingPathComponent("NaoEApp.app")
         try FileManager.default.createDirectory(at: pasta, withIntermediateDirectories: true)
 
-        XCTAssertNil(
-            ApplicationCatalog.readInfoPlist(at: pasta),
-            "uma pasta qualquer com extensão .app não deve entrar na lista de aplicativos"
-        )
+        #expect(ApplicationCatalog.readInfoPlist(at: pasta) == nil, "uma pasta qualquer com extensão .app não deve entrar na lista de aplicativos")
     }
 }

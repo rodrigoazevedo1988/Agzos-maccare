@@ -1,36 +1,48 @@
-import XCTest
+import Foundation
+import Testing
 @testable import MacCareCore
 
 /// Formatação de bytes e persistência local.
-final class CoreSupportTests: XCTestCase {
+@Suite("Formatação e histórico")
+final class CoreSupportTests {
+
+    /// Diretórios temporários criados pelos testes; removidos no `deinit`,
+    /// que roda ao fim de cada teste — inclusive quando ele falha.
+    private var temporaryDirectories: [URL] = []
+
+    deinit {
+        for directory in temporaryDirectories {
+            try? FileManager.default.removeItem(at: directory)
+        }
+    }
 
     // MARK: - Formatação
 
-    func testFormataEmUnidadesBinarias() {
-        XCTAssertEqual(ByteSizeFormatter.format(1_073_741_824), "1,0 GiB")
-        XCTAssertEqual(ByteSizeFormatter.format(1_048_576), "1,0 MiB")
-        XCTAssertEqual(ByteSizeFormatter.format(820), "820 bytes")
+    @Test func testFormataEmUnidadesBinarias() {
+        #expect(ByteSizeFormatter.format(1_073_741_824) == "1,0 GiB")
+        #expect(ByteSizeFormatter.format(1_048_576) == "1,0 MiB")
+        #expect(ByteSizeFormatter.format(820) == "820 bytes")
     }
 
     /// Acima de 100, a casa decimal vira ruído visual.
-    func testReduzCasasDecimaisEmValoresGrandes() {
-        XCTAssertEqual(ByteSizeFormatter.format(150 * 1_073_741_824), "150 GiB")
+    @Test func testReduzCasasDecimaisEmValoresGrandes() {
+        #expect(ByteSizeFormatter.format(150 * 1_073_741_824) == "150 GiB")
     }
 
     /// Valor negativo é dado corrompido; exibir "-5 MiB" seria pior que omitir.
-    func testValoresNegativosSaoTratadosComoZero() {
-        XCTAssertEqual(ByteSizeFormatter.format(-1_048_576), "0 bytes")
+    @Test func testValoresNegativosSaoTratadosComoZero() {
+        #expect(ByteSizeFormatter.format(-1_048_576) == "0 bytes")
     }
 
     /// Fração fora do intervalo é fixada nos extremos.
-    func testPorcentagemFixaValoresForaDoIntervalo() {
-        XCTAssertEqual(ByteSizeFormatter.percent(1.4), "100%")
-        XCTAssertEqual(ByteSizeFormatter.percent(-0.3), "0%")
-        XCTAssertEqual(ByteSizeFormatter.percent(.nan), "0%")
+    @Test func testPorcentagemFixaValoresForaDoIntervalo() {
+        #expect(ByteSizeFormatter.percent(1.4) == "100%")
+        #expect(ByteSizeFormatter.percent(-0.3) == "0%")
+        #expect(ByteSizeFormatter.percent(.nan) == "0%")
     }
 
-    func testCompactaParaGrafico() {
-        XCTAssertEqual(ByteSizeFormatter.compact(1_073_741_824), "1,0 GB")
+    @Test func testCompactaParaGrafico() {
+        #expect(ByteSizeFormatter.compact(1_073_741_824) == "1,0 GB")
     }
 
     // MARK: - Histórico
@@ -40,7 +52,7 @@ final class CoreSupportTests: XCTestCase {
             .appendingPathComponent("maccare-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("oplog.jsonl")
-        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        temporaryDirectories.append(directory)
         return (JSONLOperationLog(fileURL: url), url)
     }
 
@@ -59,7 +71,7 @@ final class CoreSupportTests: XCTestCase {
         )
     }
 
-    func testGravaELeHistoricoEmOrdemRecentePrimeiro() async throws {
+    @Test func testGravaELeHistoricoEmOrdemRecentePrimeiro() async throws {
         let (log, _) = try makeTempLog()
         let agora = Date()
 
@@ -67,22 +79,21 @@ final class CoreSupportTests: XCTestCase {
         try await log.append(record(at: agora, path: "/recente"))
 
         let all = try await log.all()
-        XCTAssertEqual(all.count, 2)
-        XCTAssertEqual(all.first?.affectedPaths.first, "/recente")
+        #expect(all.count == 2)
+        #expect(all.first?.affectedPaths.first == "/recente")
     }
 
-    func testHistoricoVazioNaoFalha() async throws {
+    @Test func testHistoricoVazioNaoFalha() async throws {
         let (log, _) = try makeTempLog()
-        // Autoclosures do XCTAssert não aceitam `await`.
         let all = try await log.all()
-        XCTAssertTrue(all.isEmpty)
+        #expect(all.isEmpty)
     }
 
     /// Uma linha truncada por encerramento abrupto é descartada, não fatal.
     ///
     /// Um histórico que impede o app de abrir por causa de um registro
     /// corrompido seria pior do que perder um registro.
-    func testLinhaCorrompidaNaoImpedeLeituraDoResto() async throws {
+    @Test func testLinhaCorrompidaNaoImpedeLeituraDoResto() async throws {
         let (log, url) = try makeTempLog()
         try await log.append(record(at: Date(), path: "/valido"))
 
@@ -95,32 +106,28 @@ final class CoreSupportTests: XCTestCase {
         try handle.close()
 
         let all = try await log.all()
-        XCTAssertEqual(all.count, 1, "o registro íntegro deve continuar legível")
+        #expect(all.count == 1, "o registro íntegro deve continuar legível")
     }
 
-    func testLimpaHistorico() async throws {
+    @Test func testLimpaHistorico() async throws {
         let (log, _) = try makeTempLog()
         try await log.append(record(at: Date(), path: "/x"))
         try await log.clear()
-        // Autoclosures do XCTAssert não aceitam `await`.
         let all = try await log.all()
-        XCTAssertTrue(all.isEmpty)
+        #expect(all.isEmpty)
     }
 
     /// A exportação remove o nome do usuário dos caminhos.
-    func testExportacaoRedigeNomeDoUsuario() {
+    @Test func testExportacaoRedigeNomeDoUsuario() {
         let original = record(at: Date(), path: "/Users/rodrigo/Downloads/video.mov")
         let redacted = original.redacted(homePath: "/Users/rodrigo")
 
-        XCTAssertEqual(redacted.affectedPaths.first, "~/Downloads/video.mov")
-        XCTAssertFalse(
-            redacted.affectedPaths.contains { $0.contains("rodrigo") },
-            "dado pessoal não pode vazar na exportação"
-        )
+        #expect(redacted.affectedPaths.first == "~/Downloads/video.mov")
+        #expect(!(redacted.affectedPaths.contains { $0.contains("rodrigo") }), "dado pessoal não pode vazar na exportação")
     }
 
-    func testRedacaoSemCaminhoCasaDevolveOriginal() {
+    @Test func testRedacaoSemCaminhoCasaDevolveOriginal() {
         let original = record(at: Date(), path: "/tmp/x")
-        XCTAssertEqual(original.redacted(homePath: nil).affectedPaths, original.affectedPaths)
+        #expect(original.redacted(homePath: nil).affectedPaths == original.affectedPaths)
     }
 }

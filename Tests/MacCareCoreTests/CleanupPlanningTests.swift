@@ -1,8 +1,10 @@
-import XCTest
+import Foundation
+import Testing
 @testable import MacCareCore
 
 /// Regras de seleção e contabilidade da análise consolidada.
-final class CleanupPlanningTests: XCTestCase {
+@Suite("Planejamento da limpeza")
+struct CleanupPlanningTests {
 
     private let caches = "/Users/teste/Library/Caches"
 
@@ -24,28 +26,21 @@ final class CleanupPlanningTests: XCTestCase {
     // MARK: - Seleção padrão
 
     /// Só o que é confirmado e seguro vem marcado.
-    func testPreselecionaSomenteConfirmadoESeguro() {
-        XCTAssertTrue(candidate("cache", category: .applicationCache, confidence: .certain).isPreselectedByDefault)
-        XCTAssertFalse(candidate("grande", category: .largeFiles, confidence: .certain).isPreselectedByDefault,
-                       "arquivo grande nunca vem marcado, por mais certo que esteja")
-        XCTAssertFalse(candidate("dup", category: .duplicates, confidence: .certain).isPreselectedByDefault)
-        XCTAssertFalse(candidate("dl", category: .oldDownloads, confidence: .certain).isPreselectedByDefault)
-        XCTAssertFalse(candidate("inc", category: .applicationCache, confidence: .uncertain).isPreselectedByDefault)
+    @Test func testPreselecionaSomenteConfirmadoESeguro() {
+        #expect(candidate("cache", category: .applicationCache, confidence: .certain).isPreselectedByDefault)
+        #expect(!(candidate("grande", category: .largeFiles, confidence: .certain).isPreselectedByDefault), "arquivo grande nunca vem marcado, por mais certo que esteja")
+        #expect(!(candidate("dup", category: .duplicates, confidence: .certain).isPreselectedByDefault))
+        #expect(!(candidate("dl", category: .oldDownloads, confidence: .certain).isPreselectedByDefault))
+        #expect(!(candidate("inc", category: .applicationCache, confidence: .uncertain).isPreselectedByDefault))
     }
 
     /// Categorias que podem conter dados do usuário exigem confirmação reforçada.
-    func testCategoriasArriscadasExigemConfirmacaoReforcada() {
+    @Test func testCategoriasArriscadasExigemConfirmacaoReforcada() {
         for category in [CleanupCategory.trash, .duplicates, .largeFiles, .oldDownloads, .browserData] {
-            XCTAssertTrue(
-                category.requiresReinforcedConfirmation,
-                "\(category) deveria exigir confirmação reforçada"
-            )
+            #expect(category.requiresReinforcedConfirmation, "\(category) deveria exigir confirmação reforçada")
         }
         for category in [CleanupCategory.applicationCache, .oldLogs, .temporaryFiles] {
-            XCTAssertFalse(
-                category.requiresReinforcedConfirmation,
-                "\(category) é regenerável; confirmação padrão basta"
-            )
+            #expect(!category.requiresReinforcedConfirmation, "\(category) é regenerável; confirmação padrão basta")
         }
     }
 
@@ -55,22 +50,22 @@ final class CleanupPlanningTests: XCTestCase {
     ///
     /// Somar zero para o que não conseguimos medir faria o número parecer
     /// exato quando não é. A interface sinaliza a existência desses itens.
-    func testTotalIgnoraItensSemTamanhoConhecido() {
+    @Test func testTotalIgnoraItensSemTamanhoConhecido() {
         let group = CleanupCategoryGroup(category: .applicationCache, candidates: [
             candidate("a", category: .applicationCache, confidence: .certain, size: 1_000),
             candidate("b", category: .applicationCache, confidence: .certain, size: nil),
             candidate("c", category: .applicationCache, confidence: .certain, size: 2_000)
         ])
 
-        XCTAssertEqual(group.measurableSize, 3_000)
-        XCTAssertTrue(group.hasUnmeasuredItems, "a UI precisa avisar que parte não foi medida")
+        #expect(group.measurableSize == 3_000)
+        #expect(group.hasUnmeasuredItems, "a UI precisa avisar que parte não foi medida")
     }
 
     /// O mesmo caminho em duas categorias conta uma vez só.
     ///
     /// Sem isso, a estimativa de espaço recuperável é inflada — e um número
     /// inflado é a forma mais fácil de um app de limpeza parecer melhor do que é.
-    func testTotalNaoContaOMesmoCaminhoDuasVezes() {
+    @Test func testTotalNaoContaOMesmoCaminhoDuasVezes() {
         let scope = AnalysisScope(roots: [URL(fileURLWithPath: caches)])
         let duplicated = CleanupCandidate(
             url: URL(fileURLWithPath: "\(caches)/mesmo.bin"),
@@ -93,34 +88,31 @@ final class CleanupPlanningTests: XCTestCase {
             scannedRoots: scope.roots
         )
 
-        XCTAssertEqual(result.totalRecoverable, 1_500, "\(caches)/mesmo.bin não pode contar duas vezes")
-        XCTAssertEqual(result.totalCandidates, 3, "a contagem de candidatos é outro conceito e não é deduplicada")
+        #expect(result.totalRecoverable == 1_500, "\(caches)/mesmo.bin não pode contar duas vezes")
+        #expect(result.totalCandidates == 3, "a contagem de candidatos é outro conceito e não é deduplicada")
     }
 
     // MARK: - Confiança
 
-    func testOrdenacaoDeConfianca() {
-        XCTAssertTrue(Confidence.certain > Confidence.likely)
-        XCTAssertTrue(Confidence.likely > Confidence.uncertain)
-        XCTAssertFalse(Confidence.uncertain > Confidence.certain)
+    @Test func testOrdenacaoDeConfianca() {
+        #expect(Confidence.certain > Confidence.likely)
+        #expect(Confidence.likely > Confidence.uncertain)
+        #expect(!(Confidence.uncertain > Confidence.certain))
     }
 
     // MARK: - Legibilidade de vazios
 
     /// Um estado vazio bem rotulado vale mais que um zero.
-    func testMedicaoIndisponivelCarregaMotivo() {
+    @Test func testMedicaoIndisponivelCarregaMotivo() {
         let unavailable: MacCareCore.Measurement<CPUUsage> = .unavailable(.noPublicAPI)
 
-        XCTAssertFalse(unavailable.isAvailable)
-        XCTAssertNil(unavailable.value)
-        XCTAssertEqual(unavailable.unavailableReason, .noPublicAPI)
-        XCTAssertFalse(
-            UnavailableReason.noPublicAPI.explanation.isEmpty,
-            "todo estado indisponível precisa explicar por quê"
-        )
+        #expect(!unavailable.isAvailable)
+        #expect(unavailable.value == nil)
+        #expect(unavailable.unavailableReason == .noPublicAPI)
+        #expect(!UnavailableReason.noPublicAPI.explanation.isEmpty, "todo estado indisponível precisa explicar por quê")
     }
 
-    func testMedicaoDisponivelPropagaTransformacao() {
+    @Test func testMedicaoDisponivelPropagaTransformacao() {
         let memory: MacCareCore.Measurement<MemoryUsage> = .available(
             MemoryUsage(
                 physical: 16_000_000_000,
@@ -134,6 +126,6 @@ final class CleanupPlanningTests: XCTestCase {
         )
         let bytes: MacCareCore.Measurement<Int64> = memory.map(\.physical)
 
-        XCTAssertEqual(bytes.value, 16_000_000_000)
+        #expect(bytes.value == 16_000_000_000)
     }
 }

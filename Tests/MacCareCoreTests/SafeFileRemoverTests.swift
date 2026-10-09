@@ -1,4 +1,5 @@
-import XCTest
+import Foundation
+import Testing
 @testable import MacCareCore
 
 /// ## Testes de segurança — `SafeFileRemover`
@@ -7,7 +8,8 @@ import XCTest
 /// "nenhuma exclusão de diretórios proibidos" e "comportamento com permissões
 /// insuficientes". Todos rodam contra o `InMemoryFileSystem` — nenhum arquivo
 /// real é criado ou destruído.
-final class SafeFileRemoverTests: XCTestCase {
+@Suite("Segurança — SafeFileRemover")
+struct SafeFileRemoverTests {
 
     private let home = "/Users/teste"
     private let caches = "/Users/teste/Library/Caches"
@@ -33,9 +35,9 @@ final class SafeFileRemoverTests: XCTestCase {
     // MARK: - Confirmação
 
     /// Nenhum plano executável existe sem uma confirmação válida.
-    func testSelecaoVaziaERecusada() {
-        XCTAssertThrowsError(try ConfirmedSelection(items: [], kind: .standard)) { error in
-            XCTAssertEqual(error as? RemovalPlanError, .emptySelection)
+    @Test func testSelecaoVaziaERecusada() {
+        #expect(throws: RemovalPlanError.emptySelection) {
+            try ConfirmedSelection(items: [], kind: .standard)
         }
     }
 
@@ -43,40 +45,35 @@ final class SafeFileRemoverTests: XCTestCase {
     ///
     /// A Lixeira é o caso canônico: esvaziá-la é irreversível, e o usuário
     /// precisa ter dito isso de forma inequívoca.
-    func testCategoriaArriscadaExigeConfirmacaoReforcada() {
+    @Test func testCategoriaArriscadaExigeConfirmacaoReforcada() {
         let items = [cacheCandidate("trash-item", category: .trash)]
 
-        XCTAssertThrowsError(try ConfirmedSelection(items: items, kind: .standard)) { error in
-            XCTAssertEqual(
-                error as? RemovalPlanError,
-                .insufficientConfirmation(required: .full, provided: .standard)
-            )
+        #expect(throws: RemovalPlanError.insufficientConfirmation(required: .full, provided: .standard)) {
+            try ConfirmedSelection(items: items, kind: .standard)
         }
 
-        XCTAssertNoThrow(try ConfirmedSelection(items: items, kind: .full))
+        #expect(throws: Never.self) { try ConfirmedSelection(items: items, kind: .full) }
     }
 
-    func testConfirmacaoReforcadaAceitaCategoriaSegura() {
-        XCTAssertNoThrow(try ConfirmedSelection(items: [cacheCandidate("seguro")], kind: .full))
+    @Test func testConfirmacaoReforcadaAceitaCategoriaSegura() {
+        #expect(throws: Never.self) { try ConfirmedSelection(items: [cacheCandidate("seguro")], kind: .full) }
     }
 
     /// Exclusão definitiva exige uma autorização separada da confirmação.
-    func testExclusaoDefinitivaExigeAutorizacao() {
+    @Test func testExclusaoDefinitivaExigeAutorizacao() {
         let selection = try! ConfirmedSelection(items: [cacheCandidate("x")], kind: .standard)
 
-        XCTAssertThrowsError(try RemovalPlan(selection: selection, strategy: .permanentlyDelete)) { error in
-            XCTAssertEqual(error as? RemovalPlanError, .permanentDeletionNotAuthorized)
+        #expect(throws: RemovalPlanError.permanentDeletionNotAuthorized) {
+            try RemovalPlan(selection: selection, strategy: .permanentlyDelete)
         }
 
-        XCTAssertNoThrow(
-            try RemovalPlan(selection: selection, strategy: .permanentlyDelete, allowPermanentDeletion: true)
-        )
+        #expect(throws: Never.self) { try RemovalPlan(selection: selection, strategy: .permanentlyDelete, allowPermanentDeletion: true) }
     }
 
     // MARK: - Execução
 
     /// O caminho padrão é a Lixeira, e **nada** é excluído permanentemente.
-    func testExecucaoPadraoUsaLixeira() async throws {
+    @Test func testExecucaoPadraoUsaLixeira() async throws {
         let fs = InMemoryFileSystem()
         fs.addFile("\(caches)/app.bin")
         let remover = SafeFileRemover(guardrail: makeGuard(), fs: fs)
@@ -84,9 +81,9 @@ final class SafeFileRemoverTests: XCTestCase {
         let selection = try ConfirmedSelection(items: [cacheCandidate("app.bin")], kind: .standard)
         let report = try await remover.execute(try RemovalPlan(selection: selection))
 
-        XCTAssertEqual(report.movedToTrash.count, 1)
-        XCTAssertEqual(fs.trashedPaths, ["\(caches)/app.bin"])
-        XCTAssertTrue(fs.deletedPaths.isEmpty, "nada pode ser excluído sem autorização explícita")
+        #expect(report.movedToTrash.count == 1)
+        #expect(fs.trashedPaths == ["\(caches)/app.bin"])
+        #expect(fs.deletedPaths.isEmpty, "nada pode ser excluído sem autorização explícita")
     }
 
     /// Quando a Lixeira falha, o item é **mantido** e a falha é reportada.
@@ -94,7 +91,7 @@ final class SafeFileRemoverTests: XCTestCase {
     /// Este teste existe para impedir a "correção" mais tentadora e mais errada:
     /// um `catch` que apaga o arquivo direto quando o `trashItem` falha. O
     /// usuário pediu ir para a Lixeira; falhar é a resposta correta.
-    func testFalhaAoMoverParaLixeiraNaoApagaSilenciosamente() async throws {
+    @Test func testFalhaAoMoverParaLixeiraNaoApagaSilenciosamente() async throws {
         let fs = InMemoryFileSystem()
         // O arquivo não existe no sistema de arquivos, então `moveToTrash` lança.
         let remover = SafeFileRemover(guardrail: makeGuard(), fs: fs)
@@ -102,16 +99,13 @@ final class SafeFileRemoverTests: XCTestCase {
         let selection = try ConfirmedSelection(items: [cacheCandidate("inexistente.bin")], kind: .standard)
         let report = try await remover.execute(try RemovalPlan(selection: selection))
 
-        XCTAssertEqual(report.failed.count, 1)
-        XCTAssertTrue(fs.deletedPaths.isEmpty)
-        XCTAssertTrue(
-            report.failed[0].reason?.contains("mantido intacto") == true,
-            "a mensagem precisa dizer ao usuário que o arquivo está intacto"
-        )
+        #expect(report.failed.count == 1)
+        #expect(fs.deletedPaths.isEmpty)
+        #expect(report.failed[0].reason?.contains("mantido intacto") == true, "a mensagem precisa dizer ao usuário que o arquivo está intacto")
     }
 
     /// Item bloqueado pelo `PathGuard` é **ignorado**, não removido.
-    func testItemProtegidoEIgnoradoComMotivo() async throws {
+    @Test func testItemProtegidoEIgnoradoComMotivo() async throws {
         let fs = InMemoryFileSystem()
         fs.addFile("/System/Library/alvo.dylib")
         // Escopo amplo, para provar que quem barra é a proteção, não o escopo.
@@ -127,14 +121,14 @@ final class SafeFileRemoverTests: XCTestCase {
         let selection = try ConfirmedSelection(items: [candidate], kind: .standard)
         let report = try await remover.execute(try RemovalPlan(selection: selection))
 
-        XCTAssertEqual(report.skipped.count, 1)
-        XCTAssertEqual(report.skipped[0].reason, PathGuardCode.protectedSystemPath.explanation)
-        XCTAssertTrue(fs.trashedPaths.isEmpty)
-        XCTAssertTrue(fs.deletedPaths.isEmpty)
+        #expect(report.skipped.count == 1)
+        #expect(report.skipped[0].reason == PathGuardCode.protectedSystemPath.explanation)
+        #expect(fs.trashedPaths.isEmpty)
+        #expect(fs.deletedPaths.isEmpty)
     }
 
     /// Simulação produz relatório completo sem tocar em nada.
-    func testSimulacaoNaoAlteraNenhumArquivo() async throws {
+    @Test func testSimulacaoNaoAlteraNenhumArquivo() async throws {
         let fs = InMemoryFileSystem()
         fs.addFile("\(caches)/a.bin")
         fs.addFile("\(caches)/b.bin")
@@ -146,10 +140,10 @@ final class SafeFileRemoverTests: XCTestCase {
         )
         let report = try await remover.execute(try RemovalPlan(selection: selection, strategy: .simulate))
 
-        XCTAssertEqual(report.outcomes.count, 2, "a simulação reporta todos os itens")
-        XCTAssertTrue(fs.trashedPaths.isEmpty)
-        XCTAssertTrue(fs.deletedPaths.isEmpty)
-        XCTAssertEqual(report.accounting.releasedConfirmed, 0)
+        #expect(report.outcomes.count == 2, "a simulação reporta todos os itens")
+        #expect(fs.trashedPaths.isEmpty)
+        #expect(fs.deletedPaths.isEmpty)
+        #expect(report.accounting.releasedConfirmed == 0)
     }
 
     // MARK: - Contabilidade de espaço
@@ -159,7 +153,7 @@ final class SafeFileRemoverTests: XCTestCase {
     /// A Lixeira vive no mesmo volume. Dizer "2 GB liberados" depois de mover
     /// coisas para lá é tecnicamente verdade só quando o usuário esvazia a
     /// lixeira — e o app não esvazia a lixeira sozinho.
-    func testEspacoDaLixeiraNaoECountadoComoLiberado() async throws {
+    @Test func testEspacoDaLixeiraNaoECountadoComoLiberado() async throws {
         let fs = InMemoryFileSystem()
         // O motor usa o tamanho MEDIDO na execução, não o declarado no
         // candidato; o arquivo em memória precisa ter o tamanho do cenário.
@@ -170,12 +164,12 @@ final class SafeFileRemoverTests: XCTestCase {
         let selection = try ConfirmedSelection(items: [cacheCandidate("grande.bin", size: 2_000_000_000)], kind: .standard)
         let report = try await remover.execute(try RemovalPlan(selection: selection))
 
-        XCTAssertEqual(report.accounting.releasedConfirmed, 0)
-        XCTAssertEqual(report.accounting.releasedUnconfirmed, 2_000_000_000)
+        #expect(report.accounting.releasedConfirmed == 0)
+        #expect(report.accounting.releasedUnconfirmed == 2_000_000_000)
     }
 
     /// Espaço confirmado nunca excede o que foi efetivamente medido.
-    func testEspacoConfirmadoRespeitaMedicao() async throws {
+    @Test func testEspacoConfirmadoRespeitaMedicao() async throws {
         let fs = InMemoryFileSystem()
         fs.addFile("\(caches)/alvo.bin")
         // Simula outro processo ocupando espaço entre as medições.
@@ -187,17 +181,13 @@ final class SafeFileRemoverTests: XCTestCase {
             try RemovalPlan(selection: selection, strategy: .permanentlyDelete, allowPermanentDeletion: true)
         )
 
-        XCTAssertLessThanOrEqual(
-            report.accounting.releasedConfirmed,
-            5_000,
-            "não se pode afirmar ter liberado mais do que o tamanho medido dos itens"
-        )
+        #expect(report.accounting.releasedConfirmed <= 5_000, "não se pode afirmar ter liberado mais do que o tamanho medido dos itens")
     }
 
     // MARK: - Revalidação
 
     /// O caminho é revalidado **no momento da execução**, não só na análise.
-    func testRevalidaCaminhoNoMomentoDaExecucao() async throws {
+    @Test func testRevalidaCaminhoNoMomentoDaExecucao() async throws {
         let fs = InMemoryFileSystem()
         let remover = SafeFileRemover(guardrail: makeGuard(), fs: fs)
 
@@ -213,7 +203,7 @@ final class SafeFileRemoverTests: XCTestCase {
         let selection = try ConfirmedSelection(items: [candidate], kind: .standard)
         let report = try await remover.execute(try RemovalPlan(selection: selection))
 
-        XCTAssertEqual(report.skipped.count, 1)
-        XCTAssertTrue(fs.trashedPaths.isEmpty)
+        #expect(report.skipped.count == 1)
+        #expect(fs.trashedPaths.isEmpty)
     }
 }
