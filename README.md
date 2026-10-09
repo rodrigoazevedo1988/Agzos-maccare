@@ -51,14 +51,15 @@ reflita a implementação real. Um badge de "build passou" aqui seria mentira.
 - Swift 5.10 ou superior.
 
 Compatibilidade com macOS 13 e anteriores **não é prometida** sem validação.
-O app usa Swift Charts, `os_proc_available_memory` e APIs de container
-introduzidas no Sonoma.
+O app usa Swift Charts, Observation e APIs de SwiftUI introduzidas no Sonoma.
 
 ## Como rodar
 
 ```bash
-# 1. Núcleo (testes) — rápido, sem GUI
-swift test
+# 1. Núcleo (testes, Swift Testing) — rápido, sem GUI.
+#    Funciona só com Command Line Tools; com Xcode, `swift test` direto
+#    também serve. Ver docs/TESTING.md, seção 5.
+scripts/test.sh
 
 # 2. App completo — requer macOS + XcodeGen
 brew install xcodegen

@@ -91,7 +91,7 @@ destrutiva do aplicativo: regras de caminho, confirmação, exclusão segura.
 
 ```bash
 swift build          # compila o núcleo
-swift test           # executa a suíte do núcleo
+scripts/test.sh      # executa a suíte (swift test; ver docs/TESTING.md §5)
 ```
 
 Essa é a iteração rápida: sem GUI, sem assinatura, poucos segundos. Requer
@@ -100,7 +100,7 @@ apenas o toolchain Swift; o Xcode completo não é necessário.
 Cobertura, quando for útil:
 
 ```bash
-swift test --enable-code-coverage
+scripts/test.sh --enable-code-coverage
 ```
 
 ---

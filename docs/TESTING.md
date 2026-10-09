@@ -1,9 +1,11 @@
 # Testes
 
-> **Estado:** a suíte está **escrita, não executada**. O desenvolvimento
-> ocorreu em ambiente Linux, sem toolchain Swift, então nenhum teste rodou.
-> Qualquer afirmação sobre testes "passando" neste repositório seria falsa.
-> O que existe é a intenção de teste, verificável ao rodar `swift test` em macOS.
+> **Estado:** a suíte usa **Swift Testing** (`import Testing`) e roda com
+> `swift test` em macOS — inclusive só com as Command Line Tools, sem Xcode
+> (ver seção 5). Última execução: 58 testes em 5 suítes, 57 passando e 1 falha
+> conhecida (`PathGuardTests.testPermiteSymlinkResolvidoDentroDoEscopo`, ver
+> seção 7). Os testes de interface (`Tests/MacCareUITests`) continuam em
+> XCTest/XCUITest e exigem Xcode.
 
 ---
 
@@ -94,10 +96,19 @@ passaria em revisão apressada e violaria o princípio central do produto.
 O PRD §25: *"nunca executar testes destrutivos em diretórios reais do usuário,
 usar diretórios temporários e fixtures dedicadas"*.
 
-Os testes de integração criam a própria árvore em
-`FileManager.default.temporaryDirectory` e a removem em `tearDownWithError` —
-**inclusive quando o teste falha**, porque a remoção está em teardown, não no
-final do corpo do teste.
+Os testes de integração criam a própria árvore em `/tmp` e a removem no
+`deinit` da suíte — **inclusive quando o teste falha**. A suíte é uma `class`
+e o Swift Testing cria uma instância por teste, então cada teste tem o próprio
+diretório e o `deinit` roda ao fim de cada um.
+
+Por que `/tmp` e não `FileManager.default.temporaryDirectory`: no macOS o
+temporário por usuário fica em `/private/var/folders/...`, e `/private/var` é
+caminho protegido do `PathGuard`. Os testes de remoção seriam recusados pela
+proteção em vez de exercitar a Lixeira.
+
+`testRemocaoUsaLixeiraPorPadrao` move um arquivo de verdade para a Lixeira do
+usuário (é o que ele testa). O arquivo tem nome único, o teste confere que ele
+está em `~/.Trash` e depois apaga exatamente esse item de lá.
 
 Nenhum teste toca `/Users`, `/Library` ou `/Applications`. As asserções de
 caminho usam strings com estrutura de Mac (`/Users/teste/...`) porque o que está
@@ -107,25 +118,38 @@ sob teste é a **decisão**, não o disco.
 
 ## 5. Como executar
 
+`scripts/test.sh` é `swift test` com os caminhos do Swift Testing quando só as
+Command Line Tools estão instaladas; com Xcode selecionado, ele chama
+`swift test` puro. Todos os argumentos são repassados.
+
 ```bash
-# Núcleo: unitários + segurança. Rápido, sem GUI.
-swift test
+# Núcleo + integração: unitários, segurança e sistema de arquivos real.
+scripts/test.sh
 
 # Só um arquivo
-swift test --filter PathGuardTests
+scripts/test.sh --filter PathGuardTests
 
 # Só segurança
-swift test --filter "PathGuard|SafeFileRemover"
+scripts/test.sh --filter "PathGuard|SafeFileRemover"
 
 # Diagnóstico detalhado
-swift test --verbose
+scripts/test.sh --verbose
+
+# Integração (usa o sistema de arquivos real, ainda em temporários)
+scripts/test.sh --filter CoreIntegrationTests
 ```
 
-Integração (usa o sistema de arquivos real, ainda em temporários):
+Com Xcode, `swift test` direto funciona igual.
 
-```bash
-swift test --filter CoreIntegrationTests
-```
+**Por que o script existe.** Com apenas as Command Line Tools, o
+`Testing.framework` fica em
+`/Library/Developer/CommandLineTools/Library/Developer/Frameworks`, mas o
+SwiftPM não passa esse caminho ao compilador nem ao linker. `swift test` puro
+falha com `no such module 'Testing'`. Colocar o caminho no `Package.swift` não
+basta: o runner que o SwiftPM gera não recebe o flag, compila sem
+`import Testing` e termina "verde" sem executar **nenhum** teste. Um verde falso
+é pior que um erro, então o caminho fica no script, que vale para todos os
+alvos.
 
 Via Xcode, incluindo interface:
 
@@ -155,16 +179,17 @@ xcodebuild test -scheme MacCare -destination 'platform=macOS'
 
 Honestidade sobre o buraco:
 
-- **A suíte nunca foi executada.** Não há registro de que qualquer um destes
-  testes passe — podem conter erros de compilação, e provavelmente contêm até
-  alguém executar.
-- **Não há testes de UI escritos ainda.** O diretório existe; o conteúdo está
-  pendente.
+- **Falha conhecida em aberto:** `testPermiteSymlinkResolvidoDentroDoEscopo`.
+  `PathGuard.resolve` usa `resolvingSymlinksInPath()`, que remove o prefixo
+  `/private` só quando o caminho existe: a raiz `/private/tmp` vira `/tmp`, e
+  um arquivo ainda inexistente continua `/private/tmp/...`. A falha é sempre
+  para o lado da recusa, então é segura, mas contradiz o comentário do código.
+  Corrigir é decisão de produto e fica pendente.
+- **Os testes de UI (XCUITest) não rodam sem Xcode** e não foram executados.
 - **Não há teste de concorrência** para as janelas de 4 operações do
   `SafeFileRemover`.
 - **Não há teste de PerformanceView** com amostragem de CPU.
-- **Falta o `Info.plist`**, então o alvo do app ainda não é construível.
 
-O primeiro passo ao receber o repositório em um Mac é rodar `swift test` e
+O primeiro passo ao receber o repositório em um Mac é rodar `scripts/test.sh` e
 corrigir o que aparecer. Os testes de segurança são a prioridade: eles definem
 o que o produto não pode fazer.
