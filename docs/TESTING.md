@@ -2,10 +2,19 @@
 
 > **Estado:** a suíte usa **Swift Testing** (`import Testing`) e roda com
 > `swift test` em macOS — inclusive só com as Command Line Tools, sem Xcode
-> (ver seção 5). Última execução: 58 testes em 5 suítes, 57 passando e 1 falha
-> conhecida (`PathGuardTests.testPermiteSymlinkResolvidoDentroDoEscopo`, ver
-> seção 7). Os testes de interface (`Tests/MacCareUITests`) continuam em
-> XCTest/XCUITest e exigem Xcode.
+> (ver seção 5). Última execução (9 out. 2026, macOS 27.0.1, Swift 6.3.2 CLT):
+> **90 testes em 6 suítes, todos passando**, sem testes pulados nem falhas
+> conhecidas. Os testes de interface (`Tests/MacCareUITests`) continuam em
+> XCTest/XCUITest, exigem Xcode e **nunca foram executados**.
+>
+> | Suíte | Arquivo | Testes |
+> |-------|---------|--------|
+> | Segurança — PathGuard | `PathGuardTests.swift` | 24 (um parametrizado com 7 casos) |
+> | Segurança — desinstalação de aplicativos | `AppUninstallAuthorizationTests.swift` | 20 |
+> | Segurança — SafeFileRemover | `SafeFileRemoverTests.swift` | 11 |
+> | Formatação e histórico | `CoreSupportTests.swift` | 11 |
+> | Planejamento da limpeza | `CleanupPlanningTests.swift` | 7 |
+> | Integração do núcleo | `CoreIntegrationTests.swift` | 17 |
 
 ---
 
@@ -19,7 +28,7 @@ incidente.
 |-------|--------------|------|
 | Unitários | Cálculo, dedup, filtros, ordenação, formatação, regras | `Tests/MacCareCoreTests/` |
 | Integração | Descoberta de apps, `Info.plist`, varredura, hash, Lixeira | `Tests/MacCareIntegrationTests/` |
-| Segurança | Nada é apagado sem confirmação, nada fora de escopo, symlinks | `Tests/MacCareCoreTests/PathGuardTests.swift`, `SafeFileRemoverTests.swift` |
+| Segurança | Nada é apagado sem confirmação, nada fora de escopo, symlinks, desinstalação | `Tests/MacCareCoreTests/PathGuardTests.swift`, `SafeFileRemoverTests.swift`, `AppUninstallAuthorizationTests.swift` |
 | Interface | Navegação, cancelamento, estados vazios, temas | `Tests/MacCareUITests/` |
 
 ---
@@ -52,9 +61,14 @@ padrão é a Lixeira. Essa é a forma de provar a regra, em vez de confiar nela.
 | `testSemEscopoAutorizadoNaoPermiteNada` | Um `PathGuard` vazio virar "posso remover tudo" |
 | `testRecusaRaizDoSistema` | Remoção em `/System` mesmo com escopo `["/"]` |
 | `testRecusaDescendenteDeCaminhoProtegido` | Bypass por caminho aninhado (`/usr/local/lib`) |
-| `testRecusaSymlinkQueSaiDoEscopo` | Link autorizado apontando para `/System` |
-| `testPermiteSymlinkResolvidoDentroDoEscopo` | Quebrar symlinks legítimos (`/tmp` → `/private/tmp`) |
-| `testRecusaTravessiaAcimaDaRaizAutorizada` | `../` escapando do escopo |
+| `testRecusaSymlinkQueSaiDoEscopo` | Atravessar um link **real** do escopo para `/System/Library` |
+| `testRecusaCaminhoAtravesDeSymlinkParaForaDoEscopo` | Atravessar um link real para pasta comum fora do escopo (`.symlinkEscapesScope`) |
+| `testLinkNoEscopoResolveParaOProprioLink` | Veredito apontando para o destino de um link em vez do próprio link |
+| `testPermiteSymlinkResolvidoDentroDoEscopo` | Quebrar symlinks legítimos: todas as grafias `/tmp` ↔ `/private/tmp`, inclusive caminhos inexistentes |
+| `testRecusaRaizesDeSistemaEmPrivate` (7 casos) | Remover `/private`, `/private/tmp`, `/private/var`, `/private/etc`, `/tmp`, `/var`, `/etc` |
+| `testRecusaTravessiaAcimaDaRaizAutorizada` | `../` escapando do escopo (`.pathTraversal`) |
+| `testRecusaTravessiaMesmoQuandoTerminariaNoEscopo` | Aceitar `..` só porque o resultado cai dentro |
+| `testRaizComTravessiaEDescartada` | Raiz com `..` virar autorização ampla |
 | `testRecusaARaizAutorizadaElaMesma` | Apagar a pasta que o usuário autorizou |
 | `testRecusaRemocaoDoProprioBundle` | Auto-destruição |
 
@@ -72,6 +86,27 @@ padrão é a Lixeira. Essa é a forma de provar a regra, em vez de confiar nela.
 | `testEspacoConfirmadoRespeitaMedicao` | Afirmar liberação maior que a soma medida |
 | `testRevalidaCaminhoNoMomentoDaExecucao` | TOCTOU entre análise e execução |
 
+### `AppUninstallAuthorizationTests`
+
+Tudo em `InMemoryFileSystem`; leitor de identificador e "está aberto?" são
+injetados.
+
+| Teste | O que impede |
+|-------|--------------|
+| `testBundleValidoEResiduaisSaoAceitos` | Bloquear a desinstalação legítima (bundle + 10 locais de residuais) |
+| `testCaminhoAninhadoEmApplicationsERecusado` | `/Applications/Pasta/App.app` |
+| `testItemDentroDoBundleERecusado` | Autorizar um arquivo dentro do bundle como se fosse o app |
+| `testPastaApplicationsElaMesmaERecusada` | Apagar `/Applications` |
+| `testAppDoSistemaERecusado` / `testAppDaAppleEmApplicationsERecusado` | Desinstalar app do sistema ou da Apple |
+| `testProprioBundleERecusado` | O MacCare desinstalar a si mesmo (caminho ou identificador) |
+| `testBundleQueELinkSimbolicoERecusado` | `/Applications/X.app` que é link para outro lugar |
+| `testAppAbertoERecusado` | Desinstalar app em uso |
+| `testSoOsCaminhosExatosSaoAceitos` | Autorização por prefixo (filhos, pastas-mãe, outro id, nível de sistema, `..`) |
+| `testAppAbertoDepoisDaAutorizacaoERecusadoNaExecucao` / `testBundleTrocadoPorLinkDepoisDaAutorizacaoERecusado` | TOCTOU entre a folha e a execução |
+| `testDesinstalacaoMoveSoBundleEResiduaisParaLixeira` | Remover item não autorizado na mesma seleção |
+| `testDesinstalacaoNuncaExcluiDefinitivamente` | Exclusão definitiva pela desinstalação |
+| `testLimpezaGeralContinuaRecusandoApplications` | A desinstalação "abrir" `/Applications` para a limpeza geral |
+
 `testFalhaAoMoverParaLixeiraNaoApagaSilenciosamente` merece nota: ele existe
 para impedir a "correção" mais tentadora do código — o `catch` que apaga o
 arquivo direto quando `trashItem` falha. É uma mudança de duas linhas que
@@ -88,6 +123,11 @@ passaria em revisão apressada e violaria o princípio central do produto.
 | `testHardLinksNaoViramGrupoDeDuplicatas` | Dois caminhos, um inode, zero cópias |
 | `testVarreduraRespeitaCancelamento` | `Task.isCancelled` durante varredura |
 | `testPastaSemInfoPlistNaoEReconhecidaComoApp` | `.app` falso na lista de aplicativos |
+| `testLinkDentroDoEscopoParaForaRemoveSoOLink` | Link real no escopo → só o link vai para a Lixeira; destino de 50 KB intacto e não contado |
+| `testLinkParaCaminhoProtegidoRemoveSoOLink` | Link real para `/System/Library/CoreServices` → só o link sai; atravessá-lo é recusado |
+| `testMedicaoNaoSegueLinks` | Medir (e anunciar) o espaço do destino de um link |
+| `testVarreduraNaoSegueLinks` | Varredura entrar em pasta por meio de link |
+| `testLinkQuebradoExiste` | Link quebrado "sumir" para o motor |
 
 ---
 
@@ -106,11 +146,14 @@ temporário por usuário fica em `/private/var/folders/...`, e `/private/var` é
 caminho protegido do `PathGuard`. Os testes de remoção seriam recusados pela
 proteção em vez de exercitar a Lixeira.
 
-`testRemocaoUsaLixeiraPorPadrao` move um arquivo de verdade para a Lixeira do
-usuário (é o que ele testa). O arquivo tem nome único, o teste confere que ele
-está em `~/.Trash` e depois apaga exatamente esse item de lá.
+`testRemocaoUsaLixeiraPorPadrao` e os dois testes de link movem um item de
+verdade para a Lixeira do usuário (é o que eles testam). O item tem nome único
+(UUID), o teste confere que ele está em `~/.Trash` e, num `defer`, apaga
+exatamente esse item de lá. Os testes de `PathGuard` com links reais criam e
+apagam a própria pasta em `/tmp`.
 
-Nenhum teste toca `/Users`, `/Library` ou `/Applications`. As asserções de
+Nenhum teste escreve em `/Users` (fora o item único na Lixeira), `/Library` ou
+`/Applications`; os testes de desinstalação usam `InMemoryFileSystem`. As asserções de
 caminho usam strings com estrutura de Mac (`/Users/teste/...`) porque o que está
 sob teste é a **decisão**, não o disco.
 
@@ -179,17 +222,17 @@ xcodebuild test -scheme MacCare -destination 'platform=macOS'
 
 Honestidade sobre o buraco:
 
-- **Falha conhecida em aberto:** `testPermiteSymlinkResolvidoDentroDoEscopo`.
-  `PathGuard.resolve` usa `resolvingSymlinksInPath()`, que remove o prefixo
-  `/private` só quando o caminho existe: a raiz `/private/tmp` vira `/tmp`, e
-  um arquivo ainda inexistente continua `/private/tmp/...`. A falha é sempre
-  para o lado da recusa, então é segura, mas contradiz o comentário do código.
-  Corrigir é decisão de produto e fica pendente.
 - **Os testes de UI (XCUITest) não rodam sem Xcode** e não foram executados.
 - **Não há teste de concorrência** para as janelas de 4 operações do
-  `SafeFileRemover`.
+  `SafeFileRemover`. O `InMemoryFileSystem` agora é protegido por trava, o
+  que torna esse teste possível, mas ele não foi escrito.
+- **A integração da folha de desinstalação** (`UninstallerSheet` →
+  `performUninstall`) compila e o app abre, mas não foi exercitada com um app
+  real; a regra de segurança está coberta no núcleo.
+- **`HostMetricsCollector`, `StartupItemScanner` e `RecommendationEngine`**
+  não têm teste.
 - **Não há teste de PerformanceView** com amostragem de CPU.
 
-O primeiro passo ao receber o repositório em um Mac é rodar `scripts/test.sh` e
-corrigir o que aparecer. Os testes de segurança são a prioridade: eles definem
+Antes de qualquer commit, rode `scripts/test.sh`; o CI faz o mesmo e falha se
+a contagem de testes executados for zero. Os testes de segurança são a prioridade: eles definem
 o que o produto não pode fazer.

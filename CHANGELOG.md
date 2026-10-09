@@ -63,11 +63,58 @@ o versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 - Núcleo em pacote SPM separado, sem SwiftUI — permite testar toda a superfície
   destrutiva com `swift test`, sem GUI e em segundos.
 - `project.yml` (XcodeGen) — o `.xcodeproj` é gerado e não é versionado.
-- GitHub Actions: `swift build`, `swift test`, geração do projeto, `xcodebuild
-  build` e `xcodebuild test`, com verificação de segredos no diff e checagem de
-  invariantes dos entitlements.
+- GitHub Actions (`.github/workflows/ci.yml`, runner `macos-26`):
+  `swift build`, `scripts/test.sh` exigindo contagem de testes > 0, XcodeGen
+  2.46.0 fixado, `xcodebuild build` em Release com `CODE_SIGNING_ALLOWED=NO`,
+  verificação de credenciais versionadas e das invariantes de entitlements
+  (`scripts/check-entitlements.sh`, também no binário assinado ad-hoc).
+  `xcodebuild test` e testes de interface **não** rodam no CI.
 - Documentação: `README`, `docs/ARCHITECTURE.md`, `docs/SAFETY.md`,
   `docs/TESTING.md`, `docs/BUILD.md`, `SECURITY.md`.
+
+### Segurança (9 out. 2026)
+
+- **`PathGuard` com canonicalização estilo `realpath`.** Raízes, protegidos e
+  candidatos passam pelo mesmo procedimento: ancestral existente mais profundo
+  resolvido com `realpath(3)`, restante inexistente anexado. Componentes `..`
+  são recusados (`.pathTraversal`); raiz com `..` é descartada. Corrige a falha
+  conhecida `testPermiteSymlinkResolvidoDentroDoEscopo` (`/private/tmp/x`
+  recusado com raiz `/private/tmp`).
+- `/private`, `/private/tmp`, `/private/var`, `/private/etc`, `/tmp`, `/var` e
+  `/etc` nunca são removíveis em si.
+- **Política de links simbólicos:** remove-se o próprio link, nunca o destino;
+  o link só é aceito se a localização dele estiver no escopo; atravessar um
+  link para fora do escopo ou para caminho protegido é recusado; exclusão
+  definitiva de link continua recusada. `LiveFileSystem` não segue links
+  (`lstat`) em `itemExists`, `isDirectory` e `allocatedSize`.
+- **Desinstalação com autorização dedicada** (`AppUninstallAuthorization`):
+  só o `.app` escolhido (item direto de `/Applications` ou `~/Applications`,
+  válido, não-Apple, não o MacCare, fechado, não-link) e residuais em
+  `~/Library` pelo identificador, por igualdade de caminho, só Lixeira,
+  revalidado na execução. `/Applications` continua protegido para a limpeza
+  geral. O `Uninstaller` deixa de sugerir itens de nível de sistema.
+- Novo protocolo `RemovalGuard`; `SafeFileRemover` recusa exclusão definitiva
+  quando o guardião não a permite.
+
+### Corrigido (9 out. 2026)
+
+- Data race em `DirectoryScanner` (lista de inacessíveis mutada pela tarefa do
+  enumerador) e em `SmartScanCoordinator` (`lastProgress`); ambos atrás de
+  `LockedValue`. `FileSystem.descendents` exige `errorHandler` `@Sendable`.
+- `InMemoryFileSystem` (testes) protegido por `NSLock`.
+- Os 4 avisos do Swift 6 (`FileManager` não-Sendable, `makeIterator` em
+  contexto assíncrono, `var` capturada, binding não usado). `swift build` sem
+  avisos.
+- `testRecusaSymlinkQueSaiDoEscopo` usa um link real em vez de simular o
+  caminho já resolvido.
+
+### Verificação (9 out. 2026)
+
+- `scripts/test.sh`: 90 testes em 6 suítes, todos passando (macOS 27.0.1,
+  Swift 6.3.2, só Command Line Tools).
+- App compilado fora do Xcode (pacote SwiftPM auxiliar), assinado ad-hoc e
+  aberto: janela principal exibida. `xcodebuild` e testes de interface não
+  foram executados localmente.
 
 ### Decisões que valem registro
 

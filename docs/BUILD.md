@@ -25,8 +25,9 @@ Ferramentas de linha de comando:
 xcode-select --install
 ```
 
-O XcodeGen é instalado por uma action dedicada no CI. Para uso local, a via mais
-simples é o Homebrew, **fixando a versão** para não divergir do CI:
+No CI, o XcodeGen 2.46.0 é baixado do release oficial (`xcodegen.zip`) e a
+versão é conferida antes de gerar o projeto. Para uso local, a via mais
+simples é o Homebrew, **conferindo a versão** para não divergir do CI:
 
 ```bash
 brew install xcodegen          # se já tiver uma versão instalada, atualize antes
@@ -38,34 +39,24 @@ produz diferenças que não têm relação com o código.
 
 ---
 
-## 2. Pendências que bloqueiam o primeiro build
+## 2. Pré-requisitos do primeiro build (resolvidos)
 
-Estas três precisam ser resolvidas antes que `xcodebuild` funcione. Nenhuma
-delas é opcional e nenhuma está resolvida hoje.
+As três pendências originais estão resolvidas:
 
-1. **`Resources/Info.plist` ainda não existe.**
-   `project.yml` já aponta `INFOPLIST_FILE` para esse caminho. Sem o arquivo, o
-   Xcode falha ao ler o conteúdo do plist. Ele precisa conter, no mínimo:
-   `CFBundleName`, `CFBundleIdentifier`, `CFBundleShortVersionString`,
-   `CFBundleVersion`, `CFBundlePackageType` (`APPL`), `LSMinimumSystemVersion`
-   (`14.0`), `NSPrincipalClass` (`NSApplication`), `LSApplicationCategoryType` e
-   `NSHumanReadableCopyright`.
+1. **`Resources/Info.plist` existe** com as chaves mínimas (`CFBundleName`,
+   `CFBundleIdentifier`, versões via `$(MARKETING_VERSION)` /
+   `$(CURRENT_PROJECT_VERSION)`, `CFBundlePackageType`, `LSMinimumSystemVersion`,
+   `NSPrincipalClass`, `LSApplicationCategoryType`, `NSHumanReadableCopyright`).
+2. **Descrições de uso de pasta** declaradas: Documentos, Downloads e Mesa.
+   O app **não** acessa câmera nem microfone, e `NSCameraUsageDescription` /
+   `NSMicrophoneUsageDescription` não são declaradas —
+   `scripts/check-entitlements.sh` falha se alguém as adicionar.
+3. **Alvos de teste:** `MacCareUnitTests` usa os mesmos arquivos de
+   `Tests/MacCareCoreTests` (Swift Testing); `Tests/MacCareUITests` existe
+   (XCTest), mas nunca foi executado.
 
-2. **Descrições de uso de pasta.** O app lê a pasta do usuário, então o plist
-   precisa declarar:
-   - `NSDocumentsFolderUsageDescription`
-   - `NSDownloadsFolderUsageDescription`
-   - `NSDesktopFolderUsageDescription`
-
-   O app **não** acessa câmera nem microfone. `NSCameraUsageDescription` e
-   `NSMicrophoneUsageDescription` não devem ser declaradas: incluir uma
-   descrição que o app nunca usa é afirmar ao sistema operacional algo falso e
-   cria a expectativa de um prompt que nunca aparecerá.
-
-3. **`Tests/MacCareUnitTests` e `Tests/MacCareUITests`.** Os caminhos estão
-   declarados em `project.yml`; o primeiro diretório ainda não existe e o
-   segundo está vazio. O XcodeGen gera os alvos assim que os diretórios
-   existirem.
+O que continua **não verificado**: `xcodebuild` nunca rodou fora do CI (a
+máquina de desenvolvimento só tem Command Line Tools).
 
 ---
 

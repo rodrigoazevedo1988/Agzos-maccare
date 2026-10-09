@@ -15,32 +15,46 @@ Swift + SwiftUI, privacidade local por padrão, sem APIs privadas.
 Esta seção existe porque um README que afirma mais do que o código faz é um
 problema, não um recurso. Ordem de leitura recomendada: ela primeiro.
 
+Última verificação: **9 out. 2026**, MacBook Air (Apple Silicon), macOS 27.0.1,
+Swift 6.3.2 **só com Command Line Tools** (sem Xcode instalado).
+
 | Área | Código | Compilado | Testado |
 |------|--------|-----------|---------|
-| Modelos de domínio | ✅ | ❌ | ✅ |
-| `PathGuard` (motor de segurança) | ✅ | ❌ | ✅ |
-| `SafeFileRemover` (motor de limpeza) | ✅ | ❌ | ✅ |
-| `FileSystem` + abstrações | ✅ | ❌ | ✅ |
-| Persistência de histórico (JSONL) | ✅ | ❌ | ✅ |
-| Leitura de métricas do host | ✅ | ❌ | ✅ |
-| Varredura de disco / duplicados | ✅ | ❌ | ✅ |
-| Catálogo de apps / desinstalador | ✅ | ❌ | ✅ |
-| Itens de inicialização | ✅ | ❌ | ✅ |
-| Análise consolidada + recomendações | ✅ | ❌ | ✅ |
-| Design system (tema + componentes) | ✅ | ❌ | ❌ |
-| App shell, navegação e Dashboard | ✅ | ❌ | ❌ |
-| 12 telas de módulo | ✅ | ❌ | ❌ |
-| `project.yml`, `Info.plist`, entitlements | ✅ | ❌ | ❌ |
-| GitHub Actions | ✅ | ❌ | ❌ |
+| Modelos de domínio | ✅ | ✅ `swift build` | ✅ Swift Testing |
+| `PathGuard` (motor de segurança) | ✅ | ✅ | ✅ 24 testes (1 parametrizado, 7 casos) |
+| `SafeFileRemover` (motor de limpeza) | ✅ | ✅ | ✅ 11 testes |
+| `AppUninstallAuthorization` (desinstalação) | ✅ | ✅ | ✅ 20 testes |
+| `FileSystem` + abstrações | ✅ | ✅ | ✅ integração com arquivos reais |
+| Persistência de histórico (JSONL) | ✅ | ✅ | ✅ |
+| Leitura de métricas do host | ✅ | ✅ | ❌ sem teste |
+| Varredura de disco / duplicados | ✅ | ✅ | ✅ integração |
+| Catálogo de apps / desinstalador | ✅ | ✅ | ✅ |
+| Itens de inicialização | ✅ | ✅ | ❌ sem teste dedicado |
+| Análise consolidada + recomendações | ✅ | ✅ | ⚠️ planejamento/agrupamento; `RecommendationEngine` sem teste |
+| Design system (tema + componentes) | ✅ | ✅ ¹ | ❌ |
+| App shell, navegação e Dashboard | ✅ | ✅ ¹ | ❌ ² |
+| 12 telas de módulo | ✅ | ✅ ¹ | ❌ ² |
+| `project.yml`, `Info.plist`, entitlements | ✅ | ⚠️ ³ | ✅ `scripts/check-entitlements.sh` |
+| Testes de interface (`MacCareUITests`, XCTest) | ✅ | ❌ | ❌ nunca executados |
+| GitHub Actions (`.github/workflows/ci.yml`) | ✅ | — | ⚠️ ⁴ |
 | Documentação | ✅ | — | — |
 
-**Por que "Compilado: ❌":** este projeto foi desenvolvido em um ambiente
-Linux, sem Xcode e sem toolchain Swift. O código Swift foi escrito e revisado,
-mas **nenhum binário foi gerado e nenhum teste foi executado**. A validação
-real acontece no macOS, via `swift test` (núcleo) e `xcodebuild` (app).
+**Suíte:** `scripts/test.sh` → **90 testes em 6 suítes, todos passando**
+(núcleo + integração). Nenhum teste é pulado ou marcado como falha conhecida.
 
-Isso é registrado de forma explícita porque o PRD §27 exige que a documentação
-reflita a implementação real. Um badge de "build passou" aqui seria mentira.
+1. O app compila (sem erros) e foi montado como `.app` assinado ad-hoc a
+   partir de um pacote SwiftPM auxiliar fora do repositório, porque não há
+   Xcode nesta máquina. O `.app` **abre e mostra a janela principal**; a
+   interface não foi exercitada além disso.
+2. Nenhuma tela tem teste automatizado executado. A verificação foi apenas
+   "abre sem travar".
+3. `xcodegen generate` (2.46.0) gera o projeto localmente, mas `xcodebuild`
+   **nunca rodou** nesta máquina (exige Xcode). O CI é o primeiro lugar onde
+   ele roda.
+4. O workflow compila o núcleo, roda a suíte exigindo contagem > 0, gera o
+   projeto, faz `xcodebuild build` em Release sem assinatura e confere os
+   entitlements do binário. Só conta como verificado depois de uma execução
+   verde no GitHub.
 
 ---
 
@@ -61,7 +75,10 @@ O app usa Swift Charts, Observation e APIs de SwiftUI introduzidas no Sonoma.
 #    também serve. Ver docs/TESTING.md, seção 5.
 scripts/test.sh
 
-# 2. App completo — requer macOS + XcodeGen
+# 2. Invariantes de entitlements / Info.plist (o CI roda o mesmo script)
+scripts/check-entitlements.sh
+
+# 3. App completo — requer macOS + Xcode + XcodeGen 2.46.0
 brew install xcodegen
 xcodegen generate
 open MacCare.xcodeproj

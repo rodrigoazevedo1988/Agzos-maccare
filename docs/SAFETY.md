@@ -24,18 +24,22 @@ Tudo o mais decorre disso. As seções seguintes são as consequências técnica
 
 ## 2. Onde a segurança é imposta
 
-A segurança **não** está nas telas. Está em três tipos do núcleo, em um pacote
+A segurança **não** está nas telas. Está em tipos do núcleo, em um pacote
 que não importa SwiftUI:
 
 | Camada | Arquivo | Responsabilidade |
 |--------|---------|------------------|
-| Autorização | `Safety/PathGuard.swift` | Decide quais caminhos podem ser tocados |
+| Autorização (limpeza) | `Safety/PathGuard.swift` | Decide quais caminhos podem ser tocados, por escopo |
+| Autorização (desinstalação) | `Safety/AppUninstallAuthorization.swift` | Permite exatamente um bundle e seus residuais (seção 7A) |
 | Política | `Safety/SafeFileRemover.swift` | Impõe confirmação, estratégia e contabilidade |
 | Contabilidade | `Models/OperationRecord.swift` | Registra o que foi feito |
 
 A consequência prática: uma tela mal escrita, ou um `refactor` que adicione
 chamada direta a `FileManager.removeItem`, **não contorna** nada. A única porta
-de entrada é `AppEnvironment.performCleanup`.
+de entrada é `AppEnvironment.performCleanup` (limpeza, com `PathGuard`) ou
+`AppEnvironment.performUninstall` (desinstalação, com
+`AppUninstallAuthorization`). Ambas passam pelo `SafeFileRemover`, que só
+conhece o protocolo `RemovalGuard`.
 
 ---
 
@@ -64,24 +68,45 @@ estritamente dentro de uma raiz autorizada.
 removida** — apenas o conteúdo dela. Esvaziar `~/Library/Caches` é uma decisão;
 apagar a pasta `~/Library/Caches` nunca é.
 
-### 3.3 Resolução antes da comparação
+### 3.3 Canonicalização antes da comparação
 
-O `PathGuard` compara o caminho **já resolvido**, nunca o caminho bruto.
+O `PathGuard` nunca compara o caminho bruto. Todo caminho — raízes
+autorizadas, caminhos protegidos e candidatos — passa pela **mesma**
+canonicalização (`PathGuard.canonicalLocation(of:)`), no estilo de
+`realpath(3)`:
 
-Este é o cenário que a regra previne:
+1. Caminho relativo ou com qualquer componente `..` → recusado
+   (`.pathTraversal`). Não há motivo legítimo para um candidato conter
+   travessia, nem quando ela terminaria dentro do escopo. Uma raiz autorizada
+   com `..` é **descartada** (nunca vira "autoriza tudo").
+2. O ancestral **existente mais profundo** é resolvido com `realpath`; os
+   componentes que ainda não existem são anexados literalmente. Assim
+   `/tmp/novo/arquivo` e `/private/tmp/novo/arquivo` caem no mesmo prefixo
+   (`/private/tmp/...`) mesmo antes de existirem. A versão anterior usava
+   `URL.resolvingSymlinksInPath()`, que só remove o `/private` quando o
+   caminho existe — e por isso `/private/tmp/x` era recusado com raiz
+   `/private/tmp`.
+3. **Candidatos não seguem o último componente.** Se o item for um link
+   simbólico, a localização avaliada é a do próprio link (pai canonicalizado +
+   nome do link), e o veredito vem com `isSymlink = true`. Ver seção 7.
+4. **Diretórios de referência seguem o último componente**
+   (`canonicalDirectory(of:)`): raízes autorizadas, caminhos protegidos, pastas
+   de aplicativos e a pasta pessoal. Raiz `/tmp` significa "dentro de
+   `/private/tmp`". Os caminhos protegidos entram nas duas grafias (como
+   escritos e canônicos).
+
+O cenário que a regra previne:
 
 ```
-/Users/teste/Library/Caches/atalho  ->  /System/Library/Fonts
+/Users/teste/Library/Caches/atalho  ->  /System/Library
+candidato: /Users/teste/Library/Caches/atalho/Fonts/x.ttf
 ```
 
-O link está dentro da área autorizada, mas o destino não. Comparar antes de
-resolver deixaria passar. Comparar depois barra — e barra com o motivo certo
-(`.symlinkEscapesScope`), que é diferente de "o usuário não autorizou isso".
-
-Links simbólicos legítimos do macOS (`/tmp` → `/private/tmp`, `~` →
-`/Users/x`) continuam funcionando, porque as **raíces autorizadas também são
-resolvidas** pelo mesmo procedimento. Sem isso, bloquear symlinks quebraria o
-caminho normal do sistema.
+O pai do candidato é resolvido pelo `realpath` e vira
+`/System/Library/Fonts` — recusado como `.protectedSystemPath`. Se o link
+apontasse para uma pasta comum fora do escopo, a recusa seria
+`.symlinkEscapesScope` (o caminho escrito parecia estar dentro), que é
+diferente de "o usuário não autorizou isso" (`.outsideAllowedScope`).
 
 ### 3.4 Caminhos sempre recusados
 
@@ -89,7 +114,7 @@ A lista completa vive em `PathGuard.defaultProtectedPaths`:
 
 | Grupo | Caminhos |
 |-------|----------|
-| Núcleo do sistema | `/System`, `/usr`, `/bin`, `/sbin`, `/etc`, `/dev`, `/var`, `/private/etc`, `/private/var` |
+| Núcleo do sistema | `/System`, `/usr`, `/bin`, `/sbin`, `/etc`, `/dev`, `/var`, `/private/etc`, `/private/var`, `/private/tmp/system` |
 | Rede e montagens | `/Network`, `/Volumes/Preloaded` |
 | Facetas de segurança | `/Library/Keychains`, `/Library/Security`, `/Library/Extensions`, `/Library/PrivateFrameworks`, `/Library/Apple` |
 | Login e sessão | `/Library/Preferences/com.apple.loginwindow.plist` |
@@ -105,8 +130,20 @@ seria alcançável se alguém o adicionasse como raiz autorizada.
 
 ### 3.5 Raízes de volume e diretórios de primeiro nível
 
-`/`, `/tmp`, `/Users` e qualquer outro diretório de primeiro nível são sempre
-recusados (`.volumeOrTopLevelDirectory`), mesmo com escopo `["/"]`.
+`/`, `/Users` e qualquer outro diretório de primeiro nível são sempre recusados
+(`.volumeOrTopLevelDirectory`), mesmo com escopo `["/"]`.
+
+No macOS, `/tmp`, `/var` e `/etc` são links para `/private/tmp`,
+`/private/var` e `/private/etc` — três componentes, que escapariam da regra de
+"primeiro nível". Por isso `PathGuard.nonRemovableRoots` lista explicitamente,
+nas duas grafias, as pastas que **nunca são removíveis em si**:
+`/private`, `/private/tmp`, `/private/var`, `/private/etc`, `/tmp`, `/var`,
+`/etc`, `/Users`, `/Volumes`, `/Library`, `/System`. O **conteúdo** de
+`/private/tmp` continua removível quando autorizado; a pasta, nunca.
+
+Observação: `/private/var` inteiro é protegido, o que inclui o temporário por
+usuário (`/private/var/folders/...`). Os testes de integração usam `/tmp` por
+esse motivo.
 
 ---
 
@@ -197,7 +234,7 @@ t1  outro processo troca ~/Caches/x por link para /System/Library/Fonts
 t2  limpeza      → PathGuard reavalia e barra
 ```
 
-Custo: uma chamada a `resolvingSymlinksInPath` por item. Benefício: o item não
+Custo: um `realpath` e um `lstat` por item. Benefício: o item não
 pode ser trocado entre a decisão e a ação. Para um aplicativo cuja proposta de
 valor é "limpar com segurança", esse é o ponto.
 
@@ -205,15 +242,81 @@ valor é "limpar com segurança", esse é o ponto.
 
 ## 7. Links simbólicos e hard links
 
-**Links simbólicos** — resolvidos e comparados, conforme 3.3. Na exclusão
-permanente, um link simbólico é sempre **ignorado** com motivo explícito: o app
-não remove o link, porque isso poderia ter efeito inesperado.
+**Política: remover o link, nunca o destino.**
+
+- A avaliação de um candidato que é link usa a localização **do próprio
+  link** (pai canonicalizado + nome). Ele só é aceito se essa localização
+  estiver dentro do escopo; para onde o link aponta é irrelevante, porque o
+  destino nunca é tocado.
+- `SafeFileRemover` recebe essa localização e a move para a Lixeira. O
+  `FileManager.trashItem` aplicado a um link move **o link** (verificado em
+  macOS 27: o item na Lixeira é um link simbólico e o destino continua
+  intacto). Teste: `testLinkDentroDoEscopoParaForaRemoveSoOLink`.
+- Um link para um caminho protegido (ex.: `/System/Library/CoreServices`)
+  segue a mesma regra: só o link sai. Teste:
+  `testLinkParaCaminhoProtegidoRemoveSoOLink`.
+- **Atravessar** um link (o link é um componente intermediário) é recusado
+  quando o destino está fora do escopo ou é protegido — seção 3.3.
+- **Exclusão definitiva de link é recusada** (item ignorado com motivo). Não
+  libera espaço e é a operação irreversível; a Lixeira basta.
+- **Varredura e medição nunca seguem links.** `LiveFileSystem.isDirectory` e
+  `itemExists` usam `lstat` (um link para pasta não é pasta; um link quebrado
+  existe); `allocatedSize` de um link é o tamanho do próprio link;
+  `FileSizeMeasurer` pula links filhos; o enumerador de `descendents` não
+  desce por links; `DirectoryScanner` e `DuplicateFinder` descartam links.
+  Assim o espaço "liberável" nunca inclui dados que vivem em outro lugar.
+  Teste: `testMedicaoNaoSegueLinks`, `testVarreduraNaoSegueLinks`.
 
 **Hard links** — dois caminhos para o mesmo inode são o **mesmo arquivo**. O
 `DuplicateFinder` remove-os do conjunto antes de comparar por hash
 (`deduplicatingHardLinks`). Sem isso, o app ofereceria apagar "cópias" que, ao
 remover a última, destruiriam o conteúdo original. Grupos que contêm hard links
 são marcados com `containsHardLinks` e a interface avisa.
+
+---
+
+## 7A. Desinstalação de aplicativos
+
+`/Applications` e `~/Applications` **continuam protegidos** para a limpeza
+geral: nenhuma raiz de escopo autoriza apagar algo lá dentro. A desinstalação
+usa outro guardião, `AppUninstallAuthorization`, que implementa o mesmo
+protocolo `RemovalGuard` usado pelo `SafeFileRemover`.
+
+**Criação (falha com `AppUninstallError`)** — o bundle escolhido precisa ser:
+
+| Regra | Erro |
+|-------|------|
+| Item **direto** de `/Applications` ou `~/Applications` (pai canônico igual à pasta; nem a pasta, nem subpasta, nem item dentro do bundle) | `.notDirectlyInApplicationsFolder` |
+| Não ser link simbólico | `.symlinkedBundle` |
+| `.app` com `Contents/Info.plist` e `CFBundleIdentifier` | `.invalidBundle` |
+| Não ser da Apple (`com.apple.*`; `/System/Applications` já cai na primeira regra) | `.appleApplication` |
+| Não ser o próprio MacCare (caminho ou identificador) | `.ownApplication` |
+| Não estar aberto (`NSRunningApplication`) | `.applicationIsRunning` |
+
+**O que é autorizado** — por **igualdade** de caminho canônico, nunca por
+prefixo (um filho do bundle ou de um residual é recusado):
+
+- o bundle;
+- em `~/Library`, nomeados pelo identificador: `Application Support/<id>`,
+  `Caches/<id>`, `Preferences/<id>.plist`, `Containers/<id>`,
+  `Group Containers/<id>` e `Group Containers/<TEAMID>.<id>` (TEAMID = 10
+  caracteres `A-Z0-9`), `Saved Application State/<id>.savedState`,
+  `Logs/<id>`, `HTTPStorages/<id>` e `<id>.binarycookies`, `WebKit/<id>`,
+  `LaunchAgents/<id>.plist`.
+
+Nada no nível do sistema (`/Library/...`) é oferecido nem autorizado. O
+`Uninstaller` usa exatamente a mesma lista (`leftoverLocations`) para sugerir
+residuais, então sugestão e autorização não divergem.
+
+**Garantias mantidas**
+
+- Só Lixeira: `permitsPermanentDeletion == false`; o `SafeFileRemover` rejeita
+  um plano de exclusão definitiva com esse guardião.
+- `ConfirmedSelection` continua obrigatória; a folha pede confirmação
+  reforçada quando a seleção inclui `Application Support` ou `Containers`.
+- Revalidação: `AppEnvironment.performUninstall` **recria** a autorização no
+  momento da execução, e `evaluate` confere de novo, item a item, que o bundle
+  não virou link, que o identificador é o mesmo e que o app não foi aberto.
 
 ---
 
