@@ -1,0 +1,103 @@
+# CI do MacCare.
+#
+# O que este workflow prova: o núcleo compila, TODOS os testes Swift Testing
+# rodam (e passam — com contagem > 0), o projeto do Xcode é gerado pelo
+# XcodeGen fixado, o app compila em Release sem assinatura e os entitlements
+# respeitam as invariantes de docs/BUILD.md §5.1.
+#
+# O que NÃO prova: testes de interface (MacCareUITests) não rodam aqui —
+# precisam de sessão gráfica com permissões de acessibilidade. Assinatura
+# Developer ID e notarização também não (ver docs/BUILD.md §9).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      XCODEGEN_VERSION: "2.46.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Segredos versionados
+        run: |
+          # Segunda camada além do .gitignore (*.p12, *.cer, .env).
+          if git ls-files | grep -E '\.(p12|cer|mobileprovision|provisionprofile)$|(^|/)\.env$'; then
+            echo "Arquivo de credencial versionado." >&2
+            exit 1
+          fi
+          if git grep -nE -- '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----' -- ':!*.md'; then
+            echo "Chave privada no repositório." >&2
+            exit 1
+          fi
+
+      - name: Entitlements e Info.plist
+        run: scripts/check-entitlements.sh
+
+      - name: swift build
+        run: swift build
+
+      - name: Testes (Swift Testing)
+        run: |
+          set -o pipefail
+          scripts/test.sh 2>&1 | tee test.log
+          # Um runner que compila sem o Testing.framework termina "verde" sem
+          # executar nada. Exige a linha de resumo com contagem positiva.
+          grep -E 'Test run with [1-9][0-9]* tests? in [0-9]+ suites? passed' test.log
+
+      - name: Instalar XcodeGen ${{ env.XCODEGEN_VERSION }}
+        run: |
+          curl -fsSL -o xcodegen.zip \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip"
+          unzip -q xcodegen.zip -d "$RUNNER_TEMP/xcodegen"
+          echo "$RUNNER_TEMP/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
+
+      - name: Gerar MacCare.xcodeproj
+        run: |
+          xcodegen --version | grep -q "$XCODEGEN_VERSION"
+          xcodegen generate
+
+      - name: xcodebuild build (Release, sem assinatura)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project MacCare.xcodeproj \
+            -scheme MacCare \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Entitlements no binário (assinatura ad-hoc)
+        run: |
+          APP=build/DerivedData/Build/Products/Release/MacCare.app
+          codesign --force --sign - --options runtime \
+            --entitlements Resources/MacCare.entitlements "$APP"
+          codesign --verify --strict "$APP"
+          scripts/check-entitlements.sh "$APP"
+
+      - name: Log dos testes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log
+          path: test.log
+          if-no-files-found: ignore
