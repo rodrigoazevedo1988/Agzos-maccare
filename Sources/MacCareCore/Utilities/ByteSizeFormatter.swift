@@ -45,7 +45,8 @@ public enum ByteSizeFormatter {
 
         for (suffix, scale) in binaryUnits where magnitude >= scale {
             let scaled = magnitude / scale
-            return formatNumber(scaled, defaultDigits(for: scaled)) + " " + String(suffix.dropLast())
+            // "GiB" -> "GB": remove o "i" do sufixo binário, mantendo a base 1024.
+            return formatNumber(scaled, defaultDigits(for: scaled)) + " " + suffix.replacingOccurrences(of: "iB", with: "B")
         }
 
         return "\(value) B"
