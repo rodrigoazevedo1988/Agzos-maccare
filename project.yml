@@ -1,0 +1,209 @@
+# Especificacao XcodeGen do aplicativo MacCare.
+#
+# Decisao estrutural: o arquivo MacCare.xcodeproj NAO e versionado. Ele e gerado
+# a partir deste spec com `xcodegen generate` (ver docs/BUILD.md). Um pbxproj
+# gerado em maquina e a maior fonte de conflito de merge e de diff inutil em
+# projeto macOS; o spec e o unico lugar onde o projeto do aplicativo e descrito.
+#
+# Todas as paths deste arquivo sao relativas a raiz do repositorio.
+
+name: MacCare
+
+options:
+  bundleIdPrefix: com.agzos
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  developmentLanguage: pt-BR
+  # Formatos de projeto sao um conjunto fechado de valores no Xcode. Fixar aqui
+  # evita que o projeto gerado mude de formato conforme a versao instalada.
+  projectFormat: xcode16_3
+  xcodeVersion: "16.3"
+  defaultConfig: Release
+
+configs:
+  Debug: debug
+  Release: release
+
+# Pacote local do nucleo. `path` aponta para o diretorio que contem Package.swift.
+# O mesmo pacote e resolvido pelo SwiftPM (`swift build`/`swift test` na raiz) e
+# pelo Xcode (via esta referencia), entao existe uma unica fonte de verdade para
+# as regras de seguranca: Sources/MacCareCore/Safety/.
+packages:
+  MacCareCore:
+    path: Sources/MacCareCore
+
+settings:
+  base:
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ALWAYS_SEARCH_USER_PATHS: "NO"
+    CLANG_ENABLE_OBJC_ARC: "YES"
+    # Exigido pelo Package.swift (swift-tools-version:5.10) e conferido
+    # explicitamente no CI com `swift --version`. O valor abaixo e o MODO DE
+    # LINGUAGEM (Swift 5), nao a versao do compilador: e ele que habilita
+    # SwiftUI, Swift Charts e as APIs Sonoma usadas pelo app.
+    SWIFT_VERSION: "5.0"
+    # Necessario para Developer ID e para a notarizacao. Fica aqui, no nivel de
+    # projeto, para valer para os tres alvos sem repeticao.
+    ENABLE_HARDENED_RUNTIME: "YES"
+  configs:
+    Debug:
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG"
+      DEBUG_INFORMATION_FORMAT: "dwarf"
+      ONLY_ACTIVE_ARCH: "YES"
+      # Concede attach do depurador em Debug. Substitui o antigo
+      # com.apple.security.get-task-allow, que fica <false/> no arquivo de
+      # entitlements para que o plist continue sendo XML valido para qualquer
+      # ferramenta que o leia, e nao apenas para o codesign.
+      ENABLE_TESTABILITY: "YES"
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      SWIFT_COMPILATION_MODE: "wholemodule"
+      DEBUG_INFORMATION_FORMAT: "dwarf-with-dsym"
+      ONLY_ACTIVE_ARCH: "NO"
+
+targets:
+  MacCare:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: App/
+        excludes:
+          - "**/.DS_Store"
+    dependencies:
+      - package: MacCareCore
+        product: MacCareCore
+    settings:
+      base:
+        PRODUCT_NAME: MacCare
+        PRODUCT_BUNDLE_IDENTIFIER: com.agzos.MacCare
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        # O Info.plist pendente deve referenciar $(MARKETING_VERSION) em
+        # CFBundleShortVersionString e $(CURRENT_PROJECT_VERSION) em
+        # CFBundleVersion, para que a versao viva em um lugar so.
+
+        # PENDENTE: Resources/Info.plist ainda NAO existe no repositorio.
+        # A referencia abaixo esta correta e deve ser mantida; o arquivo precisa
+        # ser criado antes do primeiro build. Sem ele o Xcode falha em
+        # "unable to read contents of Info.plist".
+        # O Info.plist precisa conter, no minimo:
+        #   CFBundleName / CFBundleIdentifier / CFBundleShortVersionString
+        #   CFBundleVersion / CFBundlePackageType (APPL) / LSMinimumSystemVersion
+        #   NSPrincipalClass (NSApplication) / LSApplicationCategoryType
+        #   NSHumanReadableCopyright
+        # Descricoes de uso exigidas pelo macOS (o app le disco do usuario):
+        #   NSDocumentsFolderUsageDescription
+        #   NSDownloadsFolderUsageDescription
+        #   NSDesktopFolderUsageDescription
+        # Nao declarar NSCameraUsageDescription nem NSMicrophoneUsageDescription:
+        # o app nao acessa camera nem microfone, e declarar o contrario faria o
+        # sistema mostrar uma autorizacao que o app nunca usa.
+        INFOPLIST_FILE: Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+
+        # App Sandbox desligado. Ver Resources/MacCare.entitlements para a
+        # justificativa completa; `ENABLE_APP_SANDBOX` e mantido explicito para
+        # que o Xcode nao reintroduza a chave em um novo target template.
+        ENABLE_APP_SANDBOX: "NO"
+        CODE_SIGN_ENTITLEMENTS: Resources/MacCare.entitlements
+
+      configs:
+        Debug:
+          # "Sign to Run Locally" (identidade ad-hoc). Permite abrir e depurar
+          # o app em uma maquina sem certificado configurado, e e a mesma
+          # identidade que o CI passa via linha de comando.
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          # PENDENTE: exige certificado "Developer ID Application" no keychain e
+          # DEVELOPMENT_TEAM preenchido. Sem isso o build de release falha de
+          # forma explicita — que e o comportamento correto: um .app assinado
+          # ad-hoc nao passa pelo Gatekeeper de outra maquina e nao pode ser
+          # distribuido. Ver docs/BUILD.md.
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Developer ID Application"
+
+  MacCareUnitTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    # Os testes unitarios vivem em Tests/MacCareCoreTests, que e tambem um alvo
+    # SPM (ver Package.swift). Sao os MESMOS arquivos: `swift test` e o
+    # `xcodebuild test -only-testing:MacCareUnitTests` executam a mesma suite.
+    #
+    # Duplicar os arquivos em um diretorio paralelo seria o erro classico de
+    # manter duas copias que divergem. O preco aqui e compilar os arquivos duas
+    # vezes; a alternativa seria nao ter execucao de teste a partir do Xcode, o
+    # que e pior para quem desenvolve no IDE.
+    #
+    # Tests/MacCareIntegrationTests NAO entra aqui de proposito: usa o sistema de
+    # arquivos real e roda por `swift test`, no CI e localmente.
+    sources:
+      - path: Tests/MacCareCoreTests
+        excludes:
+          - "**/.DS_Store"
+    dependencies:
+      - package: MacCareCore
+        product: MacCareCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.agzos.MacCare.UnitTests
+        GENERATE_INFOPLIST_FILE: "YES"
+        # Bundle de teste nao herda os entitlements do app: ele nao precisa de
+        # acesso ao disco do usuario e nao deve carregar get-task-allow.
+        CODE_SIGN_ENTITLEMENTS: ""
+        SWIFT_VERSION: "5.0"
+
+  MacCareUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Tests/MacCareUITests
+        excludes:
+          - "**/.DS_Store"
+    dependencies:
+      - target: MacCare
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.agzos.MacCare.UITests
+        GENERATE_INFOPLIST_FILE: "YES"
+        CODE_SIGN_ENTITLEMENTS: ""
+        SWIFT_VERSION: "5.0"
+        # O runner de UI tests precisa saber qual app launchar. Alternativa
+        # equivalente e a chave TEST_TARGET_NAME no Info.plist do bundle de
+        # teste; aqui fica como build setting porque o bundle usa
+        # GENERATE_INFOPLIST_FILE.
+        TEST_TARGET_NAME: MacCare
+
+# Schemes declarados explicitamente porque o CI chama `xcodebuild -scheme`.
+# Sem um scheme compartilhado no .xcodeproj, o xcodebuild falha com
+# "scheme MacCare not configured" — os schemes criados automaticamente pelo
+# IDE so existem depois que alguem abre o projeto no Xcode.
+schemes:
+  MacCare:
+    build:
+      targets:
+        MacCare: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      # Sem `parallelizable` nos testes de interface: o app exercita operacoes
+      # sobre o disco do usuario, e execucoes concorrentes no mesmo volume
+      # deixariam o resultado do teste depender da ordem de execucao.
+      targets:
+        - name: MacCareUnitTests
+          parallelizable: true
+        - name: MacCareUITests
+          parallelizable: false
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements do aplicativo MacCare.
+
+  Este arquivo e deliberadamente quase vazio. Em um app de macOS com App
+  Sandbox desligado, quase todo entitlement de seguranca do dia a dia (acesso a
+  camera, microfone, arquivos, rede) e irrelevante: sem sandbox, o processo ja
+  roda com as permissoes do usuario que o lancou. Um entitlement que nao serve
+  para nada e apenas uma superficie de ataque extra.
+
+  =====
+  App Sandbox: DESLIGADO (ausencia intencional de com.apple.security.app-sandbox)
+  =====
+  Decisao, com o motivo inteiro:
+
+  O MacCare precisa (a) varrer a pasta do usuario para montar o plano de
+  limpeza e (b) ler as permissoes de aplicativos instalados. Com o sandbox
+  ligado, as duas operacoes exigiriam concessao de acesso amplo, e a via
+  suportada para isso seria pedir Full Disk Access ao usuario. O PRD proibe
+  exatamente isso: "Nao solicitar Full Disk Access por padrao".
+
+  O app tambem nao pode simplesmente nao pedir: sem permissao, ele nao teria
+  como entregar o produto. Entao o binario assume, com transparencia, o mesmo
+  escopo de disco que o Terminal ou o Finder ja tem, e declara na interface
+  exatamente o que nao conseguiu ler.
+
+  Consequencias aceitas, e nao escondidas:
+    - o app recebe solicitacoes do sistema (Acesso a Arquivos, Acesso a Pasta
+      especifica) apenas para as pastas que o usuario autorizar;
+    - nao ha contencao de dano em caso de bug: a protecao contra exclusao
+      errada vem do PathGuard e do SafeFileRemover, nao do sandbox;
+    - a mitigacao do macOS continua valendo (TCC, SIP, Gatekeeper, protecao de
+      dados do usuario). O app nao contorna nenhuma delas.
+
+  =====
+  Hardened Runtime: LIGADO
+  =====
+  O build set ENABLE_HARDENED_RUNTIME=YES em project.yml e requirement para
+  assinatura com Developer ID e para a notarizacao. Nenhuma excecao de
+  Hardened Runtime e solicitada: sem JIT, sem memoria executavel nao assinada,
+  sem DYLD_INSERT_LIBRARIES e sem carregamento de biblioteca nao assinada, o app
+  funciona dentro do modelo padrao e nao precisa de nenhum dos
+  `com.apple.security.cs.*` de relaxamento.
+
+  Entre os relaxamentos que existem, e porque NAO estao aqui:
+    - cs.disable-library-validation — reduziria a exigencia de que todo dylib
+      carregado esteja assinado; o app nao carrega plugins.
+    - cs.allow-unsigned-executable-memory / cs.allow-jit — o app nao interpreta
+      nem gera codigo em tempo de execucao.
+    - cs.allow-dyld-environment-variables — permitiria injetar bibliotecas por
+      variavel de ambiente. E exatamente o que nao se quer num binario que apaga
+      arquivos.
+
+  =====
+  Ausencias intencionais
+  =====
+    - com.apple.security.automation.apple-events: o app nao roda scripts de
+      terminal nem automatiza outro aplicativo. Sem esse entitlement, o macOS nem
+      exibe o dialogo de autorizacao de Automacao, o que elimina uma classe
+      inteira de prompt de permissao enganoso.
+    - com.apple.security.device.camera / .microphone: nao ha esse uso no app, e
+      as descricoes correspondentes nao sao pedidas no Info.plist.
+    - com.apple.security.network.client / .server: o app nao fala com a rede.
+      Nao ha analytics, telemetria nem atualizacao remota.
+
+  =====
+  get-task-allow
+  =====
+  Fica explicitamente FALSO, e nao interpolado.
+
+  A forma popular de condicionar esse entitlement e <$(VAR)/>, que o Xcode expande
+  na hora de assinar. Ela foi descartada de proposito: deixa o arquivo com XML
+  invalido ate a expansao, o que faz qualquer ferramenta que leia os entitlements
+  direto (editores, scripts de auditoria, diffs) falhar. Um arquivo de
+  configuracao de seguranca precisa ser legivel por tudo, nao apenas pelo codesign.
+
+  Para depurar em Debug, a via correta hoje e o build setting
+  ENABLE_TESTABILITY=YES (ver project.yml), que concede o attach do depurador sem
+  gravar uma permissao permanente no binario. Este entitlement e heranca de
+  distribuicoes anteriores a ele.
+
+  Para conferir o que de fato foi gravado no binario assinado:
+      codesign -display -entitlements :- MacCare.app
+
+      A forma longa foi escolhida de proposito: a abreviada usa dois hifens
+      duplicados, e essa sequencia encerra um comentario XML. O proprio comando
+      de verificacao quebraria este arquivo se fosse escrito de outra forma.
+  docs/BUILD.md traz o comando completo.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.get-task-allow</key>
+	<false/>
+</dict>
+</plist>

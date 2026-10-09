@@ -23,12 +23,27 @@ let package = Package(
     targets: [
         .target(
             name: "MacCareCore",
-            path: "Sources/MacCareCore"
+            path: "Sources/MacCareCore",
+            // IOKit.ps fornece a leitura de bateria via API pública
+            // (IOPSCopyPowerSourcesInfo). Não existe alternativa equivalente
+            // no Foundation, e é a única forma honesta de dizer "este Mac não
+            // tem bateria" em vez de mostrar 0%.
+            linkerSettings: [
+                .linkedFramework("IOKit")
+            ]
         ),
         .testTarget(
             name: "MacCareCoreTests",
             dependencies: ["MacCareCore"],
             path: "Tests/MacCareCoreTests"
+        ),
+        // Testes de integração: exercitam o núcleo contra o sistema de
+        // arquivos real, sempre dentro de diretórios temporários criados
+        // pelo próprio teste. Nunca tocam a pasta do usuário (PRD §25).
+        .testTarget(
+            name: "MacCareIntegrationTests",
+            dependencies: ["MacCareCore"],
+            path: "Tests/MacCareIntegrationTests"
         )
     ]
 )
