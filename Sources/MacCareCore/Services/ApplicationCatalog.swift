@@ -160,52 +160,19 @@ public struct Uninstaller: Sendable {
     ///
     /// A ordem reflete a confiança: as primeiras são fortemente associadas ao
     /// bundle, as últimas são apenas "sempre que o app passou por aqui".
-    private static func residualLocations(bundleID: String, appName: String) -> [(URL, LeftoverArtifact.Association)] {
+    private static func residualLocations(bundleID: String, fs: FileSystem) -> [(URL, LeftoverArtifact.Association)] {
+        // Fonte única: a mesma lista que `AppUninstallAuthorization` autoriza.
+        // Se uma localização não estiver lá, ela não é oferecida aqui — e
+        // vice-versa. Só `~/Library`; nada no nível do sistema.
         let home = FileManager.default.homeDirectoryForCurrentUser
-
-        let support = home.appendingPathComponent("Library/Application Support", isDirectory: true)
-            .appendingPathComponent(bundleID, isDirectory: true)
-        let caches = home.appendingPathComponent("Library/Caches", isDirectory: true)
-            .appendingPathComponent(bundleID, isDirectory: true)
-        let container = home.appendingPathComponent("Library/Containers", isDirectory: true)
-            .appendingPathComponent(bundleID, isDirectory: true)
-        let webKit = home.appendingPathComponent("Library/WebKit", isDirectory: true)
-            .appendingPathComponent(bundleID, isDirectory: true)
-        let httpStorages = home.appendingPathComponent("Library/HTTPStorages", isDirectory: true)
-            .appendingPathComponent(bundleID, isDirectory: true)
-        let savedState = home.appendingPathComponent("Library/Saved Application State", isDirectory: true)
-            .appendingPathComponent("\(bundleID).savedState", isDirectory: true)
-        let prefs = home.appendingPathComponent("Library/Preferences", isDirectory: true)
-            .appendingPathComponent("\(bundleID).plist")
-        let systemPrefs = URL(fileURLWithPath: "/Library/Preferences", isDirectory: true)
-            .appendingPathComponent("\(bundleID).plist")
-
-        return [
-            (support, .bundleIdentifierMatch),
-            (caches, .bundleIdentifierMatch),
-            (container, .bundleIdentifierMatch),
-            (webKit, .bundleIdentifierMatch),
-            (httpStorages, .bundleIdentifierMatch),
-            (savedState, .bundleIdentifierMatch),
-            (prefs, .bundleIdentifierMatch),
-            (systemPrefs, .bundleIdentifierMatch),
-            // Pistas de sistema: confiança menor, exigem confirmação reforçada
-            (URL(fileURLWithPath: "/Library/Application Support", isDirectory: true)
-                .appendingPathComponent(bundleID, isDirectory: true), .locationMatch),
-            (URL(fileURLWithPath: "/Library/LaunchAgents", isDirectory: true)
-                .appendingPathComponent("\(bundleID).plist"), .locationMatch),
-            (URL(fileURLWithPath: "/Library/LaunchDaemons", isDirectory: true)
-                .appendingPathComponent("\(bundleID).plist"), .locationMatch),
-            (home.appendingPathComponent("Library/LaunchAgents", isDirectory: true)
-                .appendingPathComponent("\(bundleID).plist"), .locationMatch),
-            (home.appendingPathComponent("Library/Application Scripts", isDirectory: true)
-                .appendingPathComponent(bundleID, isDirectory: true), .locationMatch)
-        ]
+        return AppUninstallAuthorization.leftoverLocations(bundleIdentifier: bundleID, home: home, fs: fs)
+            .map { url in
+                let association: LeftoverArtifact.Association =
+                    url.path.contains("/LaunchAgents/") ? .locationMatch : .bundleIdentifierMatch
+                return (url, association)
+            }
     }
 
-    /// Encontra residuais de um aplicativo, sem remover nada.
-    ///
-    /// - Returns: artefatos existentes, com nível de confiança e aviso.
     public func findLeftovers(for application: ApplicationEntry) -> [LeftoverArtifact] {
         guard let bundleID = application.bundleIdentifier else {
             // Sem identificador, qualquer correspondência seria por nome —
@@ -215,7 +182,7 @@ public struct Uninstaller: Sendable {
 
         var artifacts: [LeftoverArtifact] = []
 
-        for (url, association) in Self.residualLocations(bundleID: bundleID, appName: application.name) {
+        for (url, association) in Self.residualLocations(bundleID: bundleID, fs: fs) {
             guard fs.itemExists(at: url) else { continue }
             let isDirectory = fs.isDirectory(at: url)
 
@@ -254,8 +221,8 @@ public struct Uninstaller: Sendable {
         if path.contains("/Preferences/") {
             return "Preferências do \(application.name). Serão restauradas aos valores padrão se você desinstalar."
         }
-        if path.hasPrefix("/Library/") {
-            return "Localizado no nível do sistema. Pode exigir permissões adicionais para remover."
+        if path.contains("/LaunchAgents/") {
+            return "Item de inicialização do \(application.name). Deixa de rodar ao fazer login."
         }
         if isDirectory {
             return nil

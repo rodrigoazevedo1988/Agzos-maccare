@@ -16,10 +16,12 @@ import SwiftUI
 /// 2. **A confiança da associação.** Identificador exato, prefixo ou
 ///    localização conhecida não são a mesma prova. Os grupos são exibidos por
 ///    `Confidence`, e só o que é `certain` vem marcado.
-/// 3. **O que o motor de segurança vai recusar.** O escopo autorizado padrão do
-///    MacCare cobre caches e logs — não `/Applications`. A folha avalia cada
-///    item com o `PathGuard` **antes** da confirmação, para não prometer uma
-///    desinstalação que a execução vai recusar item a item.
+/// 3. **O que o motor de segurança vai recusar.** A desinstalação usa uma
+///    autorização própria (`AppUninstallAuthorization`), não o escopo de
+///    limpeza: ela permite exatamente o bundle escolhido e os residuais dele
+///    em `~/Library`, só pela Lixeira. A folha avalia cada item com essa
+///    autorização **antes** da confirmação, para não prometer o que a
+///    execução vai recusar.
 struct UninstallerSheet: View {
 
     let application: ApplicationEntry
@@ -457,7 +459,7 @@ private struct ScopeBadge: View {
     private var isAllowed: Bool { verdict.isAllowed }
 
     private var title: String {
-        guard let code = verdict.deniedCode else { return "Dentro do escopo autorizado" }
+        guard let code = verdict.deniedCode else { return "Autorizado (vai para a Lixeira)" }
         switch code {
         case .outsideAllowedScope:
             return "Fora do escopo autorizado"
@@ -465,6 +467,10 @@ private struct ScopeBadge: View {
             return "Link simbólico fora do escopo"
         case .protectedSystemPath, .applicationRootDirectory, .ownApplicationBundle, .homeDirectoryItself, .volumeOrTopLevelDirectory:
             return "Protegido pelo MacCare"
+        case .applicationIsRunning:
+            return "Aplicativo aberto"
+        case .notAnUninstallableApplication:
+            return "Fora da desinstalação autorizada"
         default:
             return "Recusado"
         }
@@ -494,7 +500,7 @@ private struct ScopeBadge: View {
 /// cuida do que é decisão de interface — agrupar, deixar o usuário escolher,
 /// mostrar o que o motor de segurança vai recusar e exigir a confirmação.
 ///
-/// A remoção em si só existe dentro de `environment.performCleanup`, que
+/// A remoção em si só existe dentro de `environment.performUninstall`, que
 /// reconfirma cada caminho no momento da execução.
 @Observable
 @MainActor
@@ -585,6 +591,9 @@ final class UninstallerModel {
     var requestsStandardConfirmation = false
     var requestsReinforcedConfirmation = false
 
+    /// Autorização de desinstalação, ou o motivo pelo qual não há uma.
+    private(set) var authorization: Result<AppUninstallAuthorization, AppUninstallError>?
+
     private var hasLoaded = false
     private var loadTask: Task<Void, Never>?
 
@@ -606,7 +615,8 @@ final class UninstallerModel {
                 let uninstaller = Uninstaller()
                 return Payload(
                     leftovers: uninstaller.findLeftovers(for: application),
-                    candidates: uninstaller.removalCandidates(for: application)
+                    candidates: uninstaller.removalCandidates(for: application),
+                    authorization: AppEnvironment.uninstallAuthorization(for: application)
                 )
             }.value
 
@@ -620,9 +630,12 @@ final class UninstallerModel {
     private struct Payload: Sendable {
         let leftovers: [LeftoverArtifact]
         let candidates: [CleanupCandidate]
+        let authorization: Result<AppUninstallAuthorization, AppUninstallError>
     }
 
     private func apply(_ payload: Payload) {
+        authorization = payload.authorization
+
         // O dicionário liga cada candidato ao artefato que o originou. É o que
         // permite mostrar o `warning` e o tipo de associação — informações que
         // `CleanupCandidate` transporta parcialmente, como texto.
@@ -678,28 +691,33 @@ final class UninstallerModel {
 
     /// Veredito do motor de segurança para um item.
     ///
-    /// É uma prévia de interface, não uma autorização: `performCleanup`
-    /// revalida cada caminho no momento da execução. Mostrar o veredito antes
-    /// da confirmação evita que o usuário concorde com algo que a execução vai
-    /// recusar — o que, no escopo padrão, inclui o próprio bundle em
-    /// `/Applications`.
+    /// É uma prévia de interface: `performUninstall` recria a autorização e o
+    /// `SafeFileRemover` revalida cada caminho no momento da execução.
+    /// Mostrar o veredito antes da confirmação evita que o usuário concorde
+    /// com algo que a execução vai recusar.
     func verdict(for item: CandidateItem) -> PathVerdict {
         verdict(for: item.candidate)
     }
 
     func verdict(for candidate: CleanupCandidate) -> PathVerdict {
-        environment.pathGuard.evaluate(candidate.url)
+        guard case .success(let authorization) = authorization else {
+            return .denied(.notAnUninstallableApplication)
+        }
+        return authorization.evaluate(candidate.url)
     }
 
     /// Aviso único sobre itens que o escopo atual não cobre.
     var scopeNotice: String? {
+        if case .failure(let error) = authorization {
+            return "\(error.explanation) Nada será removido."
+        }
         let denied = allItems.filter { !verdict(for: $0).isAllowed }
         guard !denied.isEmpty else { return nil }
 
         let bundleDenied = bundleItem.map { !verdict(for: $0).isAllowed } ?? false
-        var text = "\(denied.count) item(ns) desta lista estão fora do escopo de análise autorizado"
+        var text = "\(denied.count) item(ns) desta lista não podem ser removidos pelo MacCare"
         text += bundleDenied ? ", incluindo o bundle do aplicativo. " : ". "
-        text += "O MacCare não amplia o próprio escopo sozinho: autorize a pasta do aplicativo e a pasta de dados em Ajustes, ou remova o que falta pelo Finder."
+        text += "O motivo aparece em cada item. Se quiser removê-los mesmo assim, use o Finder."
         return text
     }
 
@@ -840,12 +858,16 @@ final class UninstallerModel {
 
     /// Executa a remoção pela única porta disponível.
     ///
-    /// `performCleanup` reconfirma a seleção, revalida cada caminho e registra
-    /// a operação no histórico. Nenhum arquivo é apagado por outro caminho.
+    /// `performUninstall` recria a autorização, reconfirma a seleção,
+    /// revalida cada caminho e registra a operação no histórico. Nenhum
+    /// arquivo é apagado por outro caminho.
     func execute() {
         let candidates = selectedCandidates
         guard !candidates.isEmpty else { return }
 
+        // A confirmação que o usuário de fato deu: reforçada quando a folha
+        // pediu reforço (dados do usuário), padrão no resto.
+        let confirmation: ConfirmationKind = needsReinforcedConfirmation ? .full : .standard
         requestsStandardConfirmation = false
         requestsReinforcedConfirmation = false
         phase = .executing
@@ -854,10 +876,10 @@ final class UninstallerModel {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let (report, _) = try await environment.performCleanup(
+                let (report, _) = try await environment.performUninstall(
+                    application: self.application,
                     candidates: candidates,
-                    strategy: .moveToTrash,
-                    kind: .applicationRemoval
+                    confirmation: confirmation
                 )
                 self.result = Outcome(report: report)
             } catch {

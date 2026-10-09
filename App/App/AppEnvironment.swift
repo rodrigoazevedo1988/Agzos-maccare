@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import MacCareCore
 import Observation
@@ -81,6 +82,51 @@ public final class AppEnvironment {
     /// A confirmação é exigida aqui, no serviço, e não apenas na interface: é
     /// a única forma de garantir que nenhuma tela consiga executar uma remoção
     /// sem passar por este ponto.
+    // MARK: - Desinstalação
+
+    /// Autoriza a desinstalação de UM aplicativo.
+    ///
+    /// Não usa o `pathGuard` de limpeza: `/Applications` continua protegido
+    /// para tudo o mais. A autorização permite só o bundle escolhido e os
+    /// residuais dele em `~/Library` — e só pela Lixeira.
+    public nonisolated static func uninstallAuthorization(
+        for application: ApplicationEntry
+    ) -> Result<AppUninstallAuthorization, AppUninstallError> {
+        Result {
+            try AppUninstallAuthorization(
+                bundle: application.url,
+                isRunning: AppEnvironment.isApplicationRunning
+            )
+        }.mapError { ($0 as? AppUninstallError) ?? .invalidBundle }
+    }
+
+    /// Há algum processo aberto com este identificador?
+    public nonisolated static let isApplicationRunning: @Sendable (String) -> Bool = { identifier in
+        !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty
+    }
+
+    /// Executa a desinstalação pela autorização dedicada.
+    ///
+    /// A autorização é **recriada aqui**, no momento da execução: se o app foi
+    /// aberto, trocado por um link ou movido desde que a folha abriu, a
+    /// execução inteira é recusada. Depois disso, o `SafeFileRemover` ainda
+    /// revalida cada caminho item a item.
+    public func performUninstall(
+        application: ApplicationEntry,
+        candidates: [CleanupCandidate],
+        confirmation: ConfirmationKind
+    ) async throws -> (report: RemovalReport, record: OperationRecord) {
+        guard !candidates.isEmpty else { throw RemovalPlanError.emptySelection }
+
+        let authorization = try Self.uninstallAuthorization(for: application).get()
+        let selection = try ConfirmedSelection(items: candidates, kind: confirmation)
+        // Só Lixeira: a autorização de desinstalação recusa exclusão definitiva.
+        let plan = try RemovalPlan(selection: selection, strategy: .moveToTrash)
+        let report = try await SafeFileRemover(guardrail: authorization).execute(plan)
+        let record = try await log(report: report, kind: .applicationRemoval, strategy: .moveToTrash, itemCount: candidates.count)
+        return (report, record)
+    }
+
     public func performCleanup(
         candidates: [CleanupCandidate],
         strategy: RemovalStrategy,
@@ -100,11 +146,21 @@ public final class AppEnvironment {
         )
 
         let report = try await remover.execute(plan)
+        let record = try await log(report: report, kind: kind, strategy: strategy, itemCount: candidates.count)
+        return (report, record)
+    }
+
+    private func log(
+        report: RemovalReport,
+        kind: OperationKind,
+        strategy: RemovalStrategy,
+        itemCount: Int
+    ) async throws -> OperationRecord {
         let record = OperationRecord(
             performedAt: report.finishedAt,
             kind: kind,
             strategy: strategy.label,
-            itemCount: candidates.count,
+            itemCount: itemCount,
             succeededCount: report.movedToTrash.count + report.deleted.count,
             skippedCount: report.skipped.count,
             failedCount: report.failed.count,
@@ -115,8 +171,7 @@ public final class AppEnvironment {
             notes: report.failed.compactMap { "\($0.url.lastPathComponent): \($0.reason ?? "sem detalhe")" }
         )
         try await operationLog.append(record)
-
-        return (report, record)
+        return record
     }
 
     public enum EnvironmentError: Error, LocalizedError {
