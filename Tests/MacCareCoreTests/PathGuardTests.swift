@@ -107,39 +107,121 @@ struct PathGuardTests {
 
     // MARK: - Links simbólicos
 
-    /// Um symlink dentro do escopo que aponta para fora deve ser recusado.
+    /// Cria uma pasta temporária real em `/tmp` (não em
+    /// `FileManager.temporaryDirectory`, que fica em `/private/var`, caminho
+    /// protegido) e apaga tudo no fim — inclusive se o teste falhar.
+    private func withTemporaryDirectory(_ body: (URL) throws -> Void) throws {
+        let dir = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .appendingPathComponent("maccare-pathguard-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try body(dir)
+    }
+
+    /// Um link de verdade dentro do escopo, apontando para `/System/Library`:
+    /// qualquer caminho que **atravesse** o link é resolvido para o destino e
+    /// recusado como caminho de sistema.
     ///
     /// Este é o cenário de ataque clássico: o app varre `~/Library/Caches`,
-    /// encontra um link, resolve o destino e apaga `/System/Library`. Como a
-    /// comparação acontece **depois** da resolução, o caso é barrado.
-    @Test func testRecusaSymlinkQueSaiDoEscopo() {
-        let fs = InMemoryFileSystem()
-        // O destino real existe e está protegido.
-        fs.addFile("/System/Library/Architectures/important.dylib")
-        // O link está "dentro" do escopo autorizado.
-        fs.addFile("/Users/teste/Library/Caches/atalho")
+    /// encontra um link, segue o link e apaga `/System/Library`.
+    @Test func testRecusaSymlinkQueSaiDoEscopo() throws {
+        try withTemporaryDirectory { dir in
+            let scope = dir.appendingPathComponent("escopo", isDirectory: true)
+            try FileManager.default.createDirectory(at: scope, withIntermediateDirectories: true)
+            let link = scope.appendingPathComponent("atalho")
+            try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "/System/Library")
 
-        let guardrail = guardAllowing([caches])
+            let guardrail = PathGuard(allowedRoots: [scope])
+            let throughLink = link.appendingPathComponent("CoreServices")
 
-        // `PathGuard.resolve` delega ao Foundation. No ambiente de teste o
-        // symlink não existe de verdade, então simulamos a decisão com o
-        // caminho já resolvido, que é exatamente o que `evaluate` receberia.
-        let resolvedOutside = URL(fileURLWithPath: "/System/Library/Architectures/important.dylib")
-        let verdict = guardrail.evaluate(resolvedOutside)
+            let verdict = guardrail.evaluate(throughLink)
+            #expect(!verdict.isAllowed)
+            #expect(verdict.deniedCode == .protectedSystemPath, "o destino real é /System/Library/CoreServices")
+            #expect(FileManager.default.fileExists(atPath: "/System/Library/CoreServices"))
+        }
+    }
 
-        #expect(verdict.deniedCode == .protectedSystemPath, "mesmo recebido já resolvido, um destino de sistema é barrado")
+    /// Link dentro do escopo apontando para uma pasta comum fora do escopo:
+    /// atravessá-lo é recusado como fuga de escopo (não como "fora do escopo"
+    /// genérico), porque o caminho escrito parecia estar dentro.
+    @Test func testRecusaCaminhoAtravesDeSymlinkParaForaDoEscopo() throws {
+        try withTemporaryDirectory { dir in
+            let scope = dir.appendingPathComponent("escopo", isDirectory: true)
+            let outside = dir.appendingPathComponent("fora", isDirectory: true)
+            try FileManager.default.createDirectory(at: scope, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+            try Data("dados".utf8).write(to: outside.appendingPathComponent("documento.txt"))
+            let link = scope.appendingPathComponent("atalho")
+            try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
+
+            let guardrail = PathGuard(allowedRoots: [scope])
+            let verdict = guardrail.evaluate(link.appendingPathComponent("documento.txt"))
+
+            #expect(verdict.deniedCode == .symlinkEscapesScope)
+        }
+    }
+
+    /// O link **em si** dentro do escopo é removível — mas o veredito aponta
+    /// para a localização do link e marca `isSymlink`, nunca para o destino.
+    @Test func testLinkNoEscopoResolveParaOProprioLink() throws {
+        try withTemporaryDirectory { dir in
+            let scope = dir.appendingPathComponent("escopo", isDirectory: true)
+            try FileManager.default.createDirectory(at: scope, withIntermediateDirectories: true)
+            let link = scope.appendingPathComponent("atalho-sistema")
+            try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "/System/Library")
+
+            let guardrail = PathGuard(allowedRoots: [scope])
+            guard case .allowed(let resolved, let isSymlink) = guardrail.evaluate(link) else {
+                Issue.record("o link dentro do escopo deveria ser permitido (só o link)")
+                return
+            }
+            #expect(isSymlink)
+            #expect(resolved.lastPathComponent == "atalho-sistema")
+            #expect(!resolved.path.hasPrefix("/System"), "o veredito nunca pode apontar para o destino")
+        }
     }
 
     /// Um link **para dentro** do escopo é legítimo e deve passar.
     ///
-    /// `/tmp` é um symlink para `/private/tmp` no macOS. Se a comparação
-    /// fosses feita antes da resolução, todo uso legítimo de `/tmp` seria
-    /// barrado — e o app ficaria menos útil sem ficar mais seguro.
+    /// `/tmp` é um symlink para `/private/tmp` no macOS. Raízes e candidatos
+    /// passam pela mesma canonicalização, então qualquer combinação de grafias
+    /// — inclusive para arquivos que ainda não existem — chega ao mesmo prefixo.
     @Test func testPermiteSymlinkResolvidoDentroDoEscopo() {
-        let guardrail = guardAllowing(["/private/tmp"])
-        let verdict = guardrail.evaluate(URL(fileURLWithPath: "/private/tmp/arquivo.txt"))
+        let inexistente = "arquivo-\(UUID().uuidString).txt"
+        for (root, candidate) in [
+            ("/private/tmp", "/private/tmp/\(inexistente)"),
+            ("/tmp", "/tmp/\(inexistente)"),
+            ("/tmp", "/private/tmp/\(inexistente)"),
+            ("/private/tmp", "/tmp/\(inexistente)"),
+            ("/tmp", "/tmp/pasta-inexistente/sub/\(inexistente)")
+        ] {
+            let verdict = guardAllowing([root]).evaluate(URL(fileURLWithPath: candidate))
+            #expect(verdict.isAllowed, "\(candidate) deveria estar dentro de \(root)")
+        }
+    }
 
-        #expect(verdict.isAllowed)
+    /// As raízes de sistema que vivem um nível abaixo de `/private` nunca são
+    /// removíveis em si, em nenhuma das grafias.
+    @Test(arguments: ["/private", "/private/tmp", "/private/var", "/private/etc", "/tmp", "/var", "/etc"])
+    func testRecusaRaizesDeSistemaEmPrivate(path: String) {
+        let guardrail = guardAllowing(["/"])
+        let verdict = guardrail.evaluate(URL(fileURLWithPath: path))
+
+        #expect(verdict.deniedCode == .volumeOrTopLevelDirectory)
+    }
+
+    /// Mesmo autorizando `/tmp` explicitamente, a pasta em si não sai.
+    @Test func testRecusaPrivateTmpMesmoComTmpAutorizado() {
+        let guardrail = guardAllowing(["/tmp"])
+        #expect(!guardrail.evaluate(URL(fileURLWithPath: "/private/tmp")).isAllowed)
+        #expect(!guardrail.evaluate(URL(fileURLWithPath: "/tmp")).isAllowed)
+    }
+
+    @Test func testCanonicalizacaoDeCaminhoInexistente() throws {
+        let url = URL(fileURLWithPath: "/tmp/nao-existe-\(UUID().uuidString)/a/b.txt")
+        let canonical = try #require(PathGuard.canonicalLocation(of: url))
+        #expect(canonical.path.hasPrefix("/private/tmp/"))
+        #expect(canonical.path.hasSuffix("/a/b.txt"))
     }
 
     // MARK: - Normalização
@@ -150,6 +232,23 @@ struct PathGuardTests {
         let verdict = guardrail.evaluate(URL(fileURLWithPath: "/Users/teste/Library/Caches/../../../Documents/segredo.pdf"))
 
         #expect(!verdict.isAllowed)
+        #expect(verdict.deniedCode == .pathTraversal)
+    }
+
+    /// `..` é recusado mesmo quando, resolvido, cairia dentro do escopo:
+    /// não há motivo legítimo para um candidato conter travessia.
+    @Test func testRecusaTravessiaMesmoQuandoTerminariaNoEscopo() {
+        let guardrail = guardAllowing([caches])
+        let verdict = guardrail.evaluate(URL(fileURLWithPath: "/Users/teste/Library/Caches/a/../b.bin"))
+
+        #expect(verdict.deniedCode == .pathTraversal)
+    }
+
+    /// Raiz autorizada com `..` é descartada: nunca vira "autoriza tudo".
+    @Test func testRaizComTravessiaEDescartada() {
+        let guardrail = guardAllowing(["/Users/teste/Library/Caches/../.."])
+        #expect(guardrail.allowedRoots.isEmpty)
+        #expect(!guardrail.evaluate(URL(fileURLWithPath: "/Users/teste/Documents/x.txt")).isAllowed)
     }
 
     @Test func testRecusaCaminhoRelativo() {

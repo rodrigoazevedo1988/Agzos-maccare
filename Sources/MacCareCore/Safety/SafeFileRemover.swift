@@ -218,12 +218,12 @@ public struct RemovalReport: Hashable, Codable, Sendable {
 /// explorado. Revalidar aqui fecha essa janela.
 public actor SafeFileRemover {
 
-    private let guardrail: PathGuard
+    private let guardrail: any RemovalGuard
     private let maxConcurrentOperations: Int
     private let fs: FileSystem
 
     public init(
-        guardrail: PathGuard,
+        guardrail: any RemovalGuard,
         maxConcurrentOperations: Int = 4,
         fs: FileSystem = LiveFileSystem()
     ) {
@@ -242,6 +242,11 @@ public actor SafeFileRemover {
         // Validação defensiva: confirma que a estratégia do plano é coerente
         // com a autorização antes de tocar em qualquer arquivo.
         if plan.strategy == .permanentlyDelete && !plan.allowPermanentDeletion {
+            throw RemovalPlanError.permanentDeletionNotAuthorized
+        }
+        // Alguns guardiões (desinstalação) só aceitam a Lixeira, mesmo com o
+        // plano autorizando exclusão definitiva.
+        if plan.strategy == .permanentlyDelete && !guardrail.permitsPermanentDeletion {
             throw RemovalPlanError.permanentDeletionNotAuthorized
         }
 
@@ -315,12 +320,17 @@ public actor SafeFileRemover {
                 reason: code.explanation
             )
         case .allowed(let resolved, let isSymlink):
+            // Política de links simbólicos: `resolved` é a localização do
+            // PRÓPRIO link (o guardião nunca segue o último componente).
+            // Mover para a Lixeira ou excluir um link afeta só o link; o
+            // destino fica intacto. Exclusão definitiva de link continua
+            // recusada: é a operação irreversível e não há ganho de espaço.
             if isSymlink && strategy == .permanentlyDelete {
                 return RemovalOutcome(
                     url: url,
                     disposition: .skipped,
                     measuredSize: candidate.sizeOnDisk,
-                    reason: "Item é um link simbólico. Removemos apenas o link, nunca o destino — e isso exigiria confirmação separada."
+                    reason: "Item é um link simbólico. O MacCare só move o próprio link para a Lixeira, nunca o exclui definitivamente nem toca no destino."
                 )
             }
             return performRemoval(at: resolved, original: url, candidate: candidate, strategy: strategy)
