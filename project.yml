@@ -32,7 +32,9 @@ configs:
 # as regras de seguranca: Sources/MacCareCore/Safety/.
 packages:
   MacCareCore:
-    path: Sources/MacCareCore
+    # Raiz do repositorio: e onde esta o Package.swift. `Sources/MacCareCore`
+    # contem so os fontes do alvo e nao e um pacote SwiftPM.
+    path: .
 
 settings:
   base:
