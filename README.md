@@ -24,8 +24,15 @@ problema, não um recurso. Ordem de leitura recomendada: ela primeiro.
 | Persistência de histórico (JSONL) | ✅ | ❌ | ✅ |
 | Leitura de métricas do host | ✅ | ❌ | ✅ |
 | Varredura de disco / duplicados | ✅ | ❌ | ✅ |
-| App SwiftUI (interface) | ✅ | ❌ | ❌ |
-| CI, DMG, assinatura, notarização | ✅ | ❌ | ❌ |
+| Catálogo de apps / desinstalador | ✅ | ❌ | ✅ |
+| Itens de inicialização | ✅ | ❌ | ✅ |
+| Análise consolidada + recomendações | ✅ | ❌ | ✅ |
+| Design system (tema + componentes) | ✅ | ❌ | ❌ |
+| App shell, navegação e Dashboard | ✅ | ❌ | ❌ |
+| 12 telas de módulo | ✅ | ❌ | ❌ |
+| `project.yml`, `Info.plist`, entitlements | ✅ | ❌ | ❌ |
+| GitHub Actions | ✅ | ❌ | ❌ |
+| Documentação | ✅ | — | — |
 
 **Por que "Compilado: ❌":** este projeto foi desenvolvido em um ambiente
 Linux, sem Xcode e sem toolchain Swift. O código Swift foi escrito e revisado,

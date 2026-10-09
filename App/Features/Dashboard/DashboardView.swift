@@ -164,7 +164,7 @@ struct DashboardView: View {
                 Card {
                     HStack(spacing: Theme.Spacing.md) {
                         Image(systemName: "checkmark.circle")
-                            .font(.system(size: 20))
+                            .font(Theme.Typography.titleLarge)
                             .foregroundStyle(Theme.Palette.success)
 
                         VStack(alignment: .leading, spacing: 2) {
@@ -268,7 +268,7 @@ private struct InsightCard: View {
         Card {
             HStack(alignment: .top, spacing: Theme.Spacing.md) {
                 Image(systemName: symbol)
-                    .font(.system(size: 15))
+                    .font(Theme.Typography.bodyLarge)
                     .foregroundStyle(tint)
                     .frame(width: 20)
                     .padding(.top, 1)
@@ -316,7 +316,7 @@ private struct QuickActionButton: View {
         Button { action(destination) } label: {
             HStack(spacing: Theme.Spacing.sm) {
                 Image(systemName: symbol)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(Theme.Typography.body)
                     .foregroundStyle(Theme.Palette.accent)
                     .frame(width: 18)
 

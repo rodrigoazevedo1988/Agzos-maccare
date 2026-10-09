@@ -108,6 +108,10 @@ public enum Theme {
 
         public static let caption = Font.system(size: 11, weight: .medium)
         public static let captionEmphasized = Font.system(size: 11, weight: .semibold)
+        /// Abaixo de `caption`, para glifos de ícone dentro de células densas.
+        public static let micro = Font.system(size: 10)
+        public static let microEmphasized = Font.system(size: 10, weight: .semibold)
+        public static let iconSmall = Font.system(size: 9, weight: .semibold)
 
         /// Números grandes em tabelas e no monitor.
         public static let metric = Font.system(size: 26, weight: .medium, design: .rounded)
