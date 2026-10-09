@@ -116,11 +116,13 @@ public struct SmartScanCoordinator: Sendable {
         let startedAt = Date()
         var candidates: [CleanupCandidate] = []
         var inaccessible: [String] = []
-        var lastProgress = ScanProgress()
+        // Atualizado pelo callback de progresso, que pode rodar em outra
+        // thread: fica atrás de uma trava em vez de ser `var` capturada.
+        let lastProgress = LockedValue(ScanProgress())
 
         // 1. Caches e logs de aplicativos.
         let (cacheResult, cacheInaccessible) = await analyzeCachesAndLogs(scope: scope) { update in
-            lastProgress = update
+            lastProgress.withLock { $0 = update }
             progress(update)
         }
         candidates.append(contentsOf: cacheResult)
@@ -144,7 +146,7 @@ public struct SmartScanCoordinator: Sendable {
         let total = deduped.compactMap(\.sizeOnDisk).reduce(0, +)
 
         let final = ScanProgress(
-            filesVisited: lastProgress.filesVisited,
+            filesVisited: lastProgress.current.filesVisited,
             matchesFound: deduped.count,
             bytesMatched: total,
             currentPath: nil,

@@ -220,6 +220,119 @@ final class CoreIntegrationTests {
         #expect(report.deleted.count == 0)
     }
 
+    // MARK: - Links simbólicos (sistema de arquivos real)
+
+    /// Move um link real para a Lixeira pelo `SafeFileRemover` e devolve o
+    /// relatório. O item na Lixeira é apagado no fim (nome único).
+    private func trashLink(named name: String, pointingTo target: String) async throws -> (RemovalReport, URL) {
+        let scope = sandbox.appendingPathComponent("escopo", isDirectory: true)
+        try FileManager.default.createDirectory(at: scope, withIntermediateDirectories: true)
+        let link = scope.appendingPathComponent(name)
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: target)
+
+        let remover = SafeFileRemover(guardrail: PathGuard(allowedRoots: [scope]), fs: LiveFileSystem())
+        let candidate = CleanupCandidate(
+            url: link,
+            category: .applicationCache,
+            reason: "Link de teste.",
+            confidence: .certain,
+            sizeOnDisk: nil
+        )
+        let selection = try ConfirmedSelection(items: [candidate], kind: .standard)
+        let report = try await remover.execute(try RemovalPlan(selection: selection))
+        return (report, link)
+    }
+
+    private func isSymlink(_ url: URL) -> Bool {
+        (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil
+    }
+
+    /// Link dentro do escopo apontando para fora: o LINK vai para a Lixeira,
+    /// o destino fica exatamente como estava.
+    @Test func testLinkDentroDoEscopoParaForaRemoveSoOLink() async throws {
+        let outside = try makeFile("fora/precioso.txt", contents: String(repeating: "p", count: 50_000))
+        let name = "atalho-\(UUID().uuidString)"
+        let trashed = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".Trash", isDirectory: true)
+            .appendingPathComponent(name)
+        defer { try? FileManager.default.removeItem(at: trashed) }
+
+        let (report, link) = try await trashLink(named: name, pointingTo: outside.deletingLastPathComponent().path)
+
+        #expect(report.movedToTrash.count == 1)
+        #expect(!isSymlink(link), "o link saiu do lugar")
+        #expect(isSymlink(trashed), "o que foi para a Lixeira é o próprio link")
+        #expect(FileManager.default.fileExists(atPath: outside.path), "o destino continua intacto")
+        #expect((try? Data(contentsOf: outside))?.count == 50_000)
+        // O espaço "liberado" é o do link, não os 50 KB do destino.
+        #expect((report.movedToTrash.first?.measuredSize ?? 0) < 50_000)
+    }
+
+    /// Link para um caminho protegido: só o link sai; atravessá-lo é recusado.
+    @Test func testLinkParaCaminhoProtegidoRemoveSoOLink() async throws {
+        let name = "sistema-\(UUID().uuidString)"
+        let trashed = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".Trash", isDirectory: true)
+            .appendingPathComponent(name)
+        defer { try? FileManager.default.removeItem(at: trashed) }
+
+        let (report, link) = try await trashLink(named: name, pointingTo: "/System/Library/CoreServices")
+
+        #expect(report.movedToTrash.count == 1)
+        #expect(isSymlink(trashed))
+        #expect(FileManager.default.fileExists(atPath: "/System/Library/CoreServices/Finder.app"))
+
+        // E um caminho que atravessa um link para o sistema é recusado.
+        let scope = sandbox.appendingPathComponent("escopo", isDirectory: true)
+        let other = scope.appendingPathComponent("outro-\(UUID().uuidString)")
+        try FileManager.default.createSymbolicLink(atPath: other.path, withDestinationPath: "/System/Library")
+        let verdict = PathGuard(allowedRoots: [scope]).evaluate(other.appendingPathComponent("CoreServices"))
+        #expect(verdict.deniedCode == .protectedSystemPath)
+        _ = link
+    }
+
+    /// A medição nunca segue links: um link para uma pasta grande mede o
+    /// próprio link, e a soma de uma pasta não inclui o destino dos links.
+    @Test func testMedicaoNaoSegueLinks() throws {
+        try makeFile("grande/dados.bin", contents: String(repeating: "g", count: 200_000))
+        try makeFile("pasta/pequeno.bin", contents: "x")
+        let link = sandbox.appendingPathComponent("pasta/atalho")
+        try FileManager.default.createSymbolicLink(
+            at: link,
+            withDestinationURL: sandbox.appendingPathComponent("grande")
+        )
+        let fs = LiveFileSystem()
+
+        #expect(!fs.isDirectory(at: link), "um link para pasta não é uma pasta")
+        #expect(fs.isSymbolicLink(at: link))
+        #expect((fs.allocatedSize(of: link) ?? 0) < 200_000)
+        let total = try #require(FileSizeMeasurer.directorySize(of: sandbox.appendingPathComponent("pasta"), fs: fs))
+        #expect(total < 200_000)
+    }
+
+    /// Um link quebrado ainda "existe" para fins de remoção.
+    @Test func testLinkQuebradoExiste() throws {
+        let link = sandbox.appendingPathComponent("quebrado")
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "/tmp/nao-existe-\(UUID().uuidString)")
+        #expect(LiveFileSystem().itemExists(at: link))
+    }
+
+    /// A varredura não entra em pastas por meio de links.
+    @Test func testVarreduraNaoSegueLinks() async throws {
+        try makeFile("grande/dados.bin", contents: String(repeating: "g", count: 40_000))
+        let area = sandbox.appendingPathComponent("area", isDirectory: true)
+        try FileManager.default.createDirectory(at: area, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: area.appendingPathComponent("atalho"),
+            withDestinationURL: sandbox.appendingPathComponent("grande")
+        )
+
+        let scanner = DirectoryScanner(fs: LiveFileSystem(), limits: .quick)
+        let result = try await scanner.scanLargeFiles(roots: [area], query: FileQuery(minimumSize: 10_000))
+
+        #expect(result.files.isEmpty, "o arquivo grande só é alcançável pelo link")
+    }
+
     // MARK: - Info.plist
 
     @Test func testLeInfoPlistDeBundleDeTeste() throws {

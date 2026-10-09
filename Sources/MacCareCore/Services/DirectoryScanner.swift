@@ -134,7 +134,9 @@ public actor DirectoryScanner {
         let syncedRoots = SyncedFolderDetector.detect()
 
         var matches: [LargeFileEntry] = []
-        var inaccessible: [String] = []
+        // A coleta de itens ilegíveis acontece na tarefa do enumerador, em
+        // outra thread; por isso fica atrás de uma trava.
+        let inaccessible = LockedValue<[String]>([])
         var visited = 0
         var truncated = false
         var state = ScanProgress()
@@ -144,7 +146,7 @@ public actor DirectoryScanner {
                 of: root,
                 skipDirectories: true,
                 maxResults: effectiveLimits.maxFileCount,
-                errorHandler: { url, _ in inaccessible.append(url.path) }
+                errorHandler: { url, _ in inaccessible.withLock { $0.append(url.path) } }
             ) {
                 try Task.checkCancellation()
                 visited += 1
@@ -196,7 +198,7 @@ public actor DirectoryScanner {
         )
         progress(finalProgress)
 
-        return LargeFileScanResult(files: matches, progress: finalProgress, inaccessiblePaths: inaccessible)
+        return LargeFileScanResult(files: matches, progress: finalProgress, inaccessiblePaths: inaccessible.current)
     }
 
     /// Monta uma árvore de tamanhos até `maxDepth`, para o mapa de armazenamento.

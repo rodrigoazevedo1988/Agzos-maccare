@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Identificador de recurso (inode no APFS) de um arquivo.
@@ -60,12 +61,21 @@ public protocol FileSystem: Sendable {
         of root: URL,
         skipDirectories: Bool,
         maxResults: Int,
-        errorHandler: @escaping (URL, any Error) -> Void
+        errorHandler: @escaping @Sendable (URL, any Error) -> Void
     ) -> AsyncStream<URL>
 }
 
 /// Implementação sobre `FileManager`.
-public struct LiveFileSystem: FileSystem {
+///
+/// Nenhuma operação segue links simbólicos: `itemExists`, `isDirectory` e
+/// os tamanhos descrevem o próprio link (como `lstat`). Seguir um link durante
+/// a medição contaria — e exibiria como "liberável" — espaço que pertence a
+/// outro lugar, possivelmente fora do escopo.
+///
+/// `@unchecked Sendable`: `FileManager` não é marcado `Sendable`, mas a
+/// documentação da Apple o declara seguro entre threads quando não se usa
+/// `delegate` — e este tipo nunca atribui delegate.
+public struct LiveFileSystem: FileSystem, @unchecked Sendable {
 
     private let manager: FileManager
 
@@ -92,13 +102,16 @@ public struct LiveFileSystem: FileSystem {
     }
 
     public func itemExists(at url: URL) -> Bool {
-        manager.fileExists(atPath: url.path)
+        // `lstat`: um link quebrado também "existe" (e pode ser removido).
+        var info = stat()
+        return lstat(url.path, &info) == 0
     }
 
     public func isDirectory(at url: URL) -> Bool {
-        var isDir: ObjCBool = false
-        let exists = manager.fileExists(atPath: url.path, isDirectory: &isDir)
-        return exists && isDir.boolValue
+        // Não segue links: um link para diretório NÃO é um diretório.
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else { return false }
+        return (info.st_mode & S_IFMT) == S_IFDIR
     }
 
     public func isSymbolicLink(at url: URL) -> Bool {
@@ -118,6 +131,12 @@ public struct LiveFileSystem: FileSystem {
     }
 
     public func allocatedSize(of url: URL) -> Int64? {
+        // Link simbólico: conta o tamanho do próprio link, nunca o destino.
+        if isSymbolicLink(at: url) {
+            var info = stat()
+            guard lstat(url.path, &info) == 0 else { return nil }
+            return Int64(info.st_blocks) * 512
+        }
         let values = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileSizeKey])
         if let allocated = values?.totalFileAllocatedSize { return Int64(allocated) }
         if isDirectory(at: url) { return FileSizeMeasurer.directorySize(of: url, fs: self) }
@@ -159,7 +178,7 @@ public struct LiveFileSystem: FileSystem {
         of root: URL,
         skipDirectories: Bool,
         maxResults: Int,
-        errorHandler: @escaping (URL, any Error) -> Void
+        errorHandler: @escaping @Sendable (URL, any Error) -> Void
     ) -> AsyncStream<URL> {
         let manager = self.manager
         return AsyncStream(bufferingPolicy: .bufferingNewest(512)) { continuation in
@@ -178,7 +197,9 @@ public struct LiveFileSystem: FileSystem {
                     continuation.finish()
                     return
                 }
-                for case let url as URL in enumerator {
+                // `nextObject()` em vez de `for in`: o iterador de
+                // NSEnumerator não está disponível em contexto assíncrono.
+                while let url = enumerator.nextObject() as? URL {
                     if Task.isCancelled { break }
                     guard emitted < maxResults else { break }
                     if skipDirectories {

@@ -89,7 +89,7 @@ public struct DuplicateFinder: Sendable {
         let totalToHash = sizeGroups.values.reduce(0) { $0 + $1.count }
         var hashed = 0
 
-        for (size, entries) in sizeGroups {
+        for (_, entries) in sizeGroups {
             try Task.checkCancellation()
 
             // Hard links do mesmo inode são o MESMO arquivo, não duplicatas.
