@@ -109,7 +109,7 @@ final class CleanupPlanningTests: XCTestCase {
 
     /// Um estado vazio bem rotulado vale mais que um zero.
     func testMedicaoIndisponivelCarregaMotivo() {
-        let unavailable: Measurement<CPUUsage> = .unavailable(.noPublicAPI)
+        let unavailable: MacCareCore.Measurement<CPUUsage> = .unavailable(.noPublicAPI)
 
         XCTAssertFalse(unavailable.isAvailable)
         XCTAssertNil(unavailable.value)
@@ -121,7 +121,7 @@ final class CleanupPlanningTests: XCTestCase {
     }
 
     func testMedicaoDisponivelPropagaTransformacao() {
-        let memory: Measurement<MemoryUsage> = .available(
+        let memory: MacCareCore.Measurement<MemoryUsage> = .available(
             MemoryUsage(
                 physical: 16_000_000_000,
                 wired: 1_000_000_000,
@@ -132,7 +132,7 @@ final class CleanupPlanningTests: XCTestCase {
                 swapUsed: nil
             )
         )
-        let bytes: Measurement<Int64> = memory.map(\.physical)
+        let bytes: MacCareCore.Measurement<Int64> = memory.map(\.physical)
 
         XCTAssertEqual(bytes.value, 16_000_000_000)
     }

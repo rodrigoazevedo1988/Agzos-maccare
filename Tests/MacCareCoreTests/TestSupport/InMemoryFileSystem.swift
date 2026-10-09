@@ -20,9 +20,13 @@ final class InMemoryFileSystem: FileSystem, @unchecked Sendable {
         var trashed: Bool = false
     }
 
-    private var nodes: [String: Node]
-    private var availableBytes: Int64
-    private var totalBytes: Int64
+    private var nodes: [String: Node] = [:]
+    // Valores padrão de um volume folgado; testes de contabilidade de espaço
+    // definem os seus com `setVolume(available:total:)`.
+    private var availableBytes: Int64 = 100_000_000_000
+    private var totalBytes: Int64 = 500_000_000_000
+
+    init() {}
 
     /// Tudo que foi jogado na Lixeira. Nenhum teste pode assumir que remoção
     /// equivale a exclusão; esta lista é a prova.

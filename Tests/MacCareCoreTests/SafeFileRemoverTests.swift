@@ -161,7 +161,9 @@ final class SafeFileRemoverTests: XCTestCase {
     /// lixeira — e o app não esvazia a lixeira sozinho.
     func testEspacoDaLixeiraNaoECountadoComoLiberado() async throws {
         let fs = InMemoryFileSystem()
-        fs.addFile("\(caches)/grande.bin")
+        // O motor usa o tamanho MEDIDO na execução, não o declarado no
+        // candidato; o arquivo em memória precisa ter o tamanho do cenário.
+        fs.addFile("\(caches)/grande.bin", size: 2_000_000_000)
         fs.setVolume(available: 10_000_000_000, total: 500_000_000_000)
         let remover = SafeFileRemover(guardrail: makeGuard(), fs: fs)
 

@@ -73,7 +73,9 @@ final class CoreSupportTests: XCTestCase {
 
     func testHistoricoVazioNaoFalha() async throws {
         let (log, _) = try makeTempLog()
-        XCTAssertTrue(try await log.all().isEmpty)
+        // Autoclosures do XCTAssert não aceitam `await`.
+        let all = try await log.all()
+        XCTAssertTrue(all.isEmpty)
     }
 
     /// Uma linha truncada por encerramento abrupto é descartada, não fatal.
@@ -84,7 +86,13 @@ final class CoreSupportTests: XCTestCase {
         let (log, url) = try makeTempLog()
         try await log.append(record(at: Date(), path: "/valido"))
 
-        try Data("{\"quebrado\": tru".utf8).write(to: url, options: .atomic)
+        // Simula uma escrita interrompida: ACRESCENTA uma linha truncada ao
+        // final. (Gravar com `.atomic` substituiria o arquivo inteiro e
+        // apagaria também o registro íntegro que o teste quer preservar.)
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("{\"quebrado\": tru".utf8))
+        try handle.close()
 
         let all = try await log.all()
         XCTAssertEqual(all.count, 1, "o registro íntegro deve continuar legível")
@@ -94,7 +102,9 @@ final class CoreSupportTests: XCTestCase {
         let (log, _) = try makeTempLog()
         try await log.append(record(at: Date(), path: "/x"))
         try await log.clear()
-        XCTAssertTrue(try await log.all().isEmpty)
+        // Autoclosures do XCTAssert não aceitam `await`.
+        let all = try await log.all()
+        XCTAssertTrue(all.isEmpty)
     }
 
     /// A exportação remove o nome do usuário dos caminhos.

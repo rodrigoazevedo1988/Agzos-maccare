@@ -16,7 +16,11 @@ final class CoreIntegrationTests: XCTestCase {
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        sandbox = FileManager.default.temporaryDirectory
+        // `/tmp`, e não `FileManager.temporaryDirectory`: no macOS o temporário
+        // por usuário fica em `/private/var/folders/...`, e `/private/var` é
+        // caminho protegido do `PathGuard` — os testes de remoção seriam
+        // recusados pela proteção (corretamente) em vez de exercitar a Lixeira.
+        sandbox = URL(fileURLWithPath: "/tmp", isDirectory: true)
             .appendingPathComponent("maccare-integration-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
     }
@@ -147,10 +151,9 @@ final class CoreIntegrationTests: XCTestCase {
         let link = sandbox.appendingPathComponent("link.bin")
 
         // Criar hard link exige o mesmo volume; pode falhar em alguns sistemas.
-        try XCTSkipIf(
-            FileManager.default.linkItem(at: original, to: link) == false,
-            "sistema de arquivos não suporta hard link neste ambiente"
-        )
+        // `linkItem` lança em vez de devolver Bool.
+        let linked = (try? FileManager.default.linkItem(at: original, to: link)) != nil
+        try XCTSkipIf(!linked, "sistema de arquivos não suporta hard link neste ambiente")
 
         let finder = DuplicateFinder(fs: LiveFileSystem(), minimumSize: 100)
         let groups = try await finder.findDuplicates(in: [sandbox])

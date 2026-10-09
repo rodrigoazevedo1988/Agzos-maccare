@@ -163,7 +163,9 @@ final class PathGuardTests: XCTestCase {
 
     func testRecusaCaminhoVazio() {
         let guardrail = guardAllowing([caches])
-        let verdict = guardrail.evaluate(URL(fileURLWithPath: ""))
+        // `URL(fileURLWithPath: "")` vira o diretório atual (caminho absoluto),
+        // então não serve para exercitar o caso. `file:` tem `path` vazio.
+        let verdict = guardrail.evaluate(URL(string: "file:")!)
 
         XCTAssertEqual(verdict.deniedCode, .emptyPath)
     }
